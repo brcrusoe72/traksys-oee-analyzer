@@ -1,5 +1,7 @@
 # Traksys OEE Analyzer
 
+**[Try it live](https://traksys-oee-analyzer-esh6dt3bptdjg83ubda4wb.streamlit.app/)**
+
 Production-grade OEE analysis suite for food manufacturing. Reads Traksys/MES data exports and generates multi-sheet Excel reports with shift deep dives, downtime Pareto analysis, fault classification, and prioritized action recommendations.
 
 Built by a CI engineer who got tired of the Pareto analysis never getting done.
@@ -44,7 +46,9 @@ python third_shift_targets.py --product product_data.json --downtime kb.json
 
 ## Streamlit App
 
-Run the web interface — no CLI needed:
+**Live at:** https://traksys-oee-analyzer-esh6dt3bptdjg83ubda4wb.streamlit.app/
+
+Or run locally:
 
 ```bash
 streamlit run streamlit_app.py
