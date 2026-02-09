@@ -74,10 +74,10 @@ EXPECTED_SHEETS = {
         "aliases": ["dayshifthour", "day_shift_hour", "day shift hour",
                      "hourly", "hourlydata", "hourly_data", "hourly data"],
         "columns": [
-            "shift_date", "shift", "shift_hour", "time_block",
-            "block_start", "block_end", "cases_per_hour", "oee_pct",
-            "total_cases", "total_hours", "availability", "performance",
-            "quality", "intervals"
+            "shift_date", "shift", "time_block", "shift_hour",
+            "total_hours", "product_code", "job", "good_cases",
+            "bad_cases", "total_cases", "availability", "performance",
+            "quality", "oee_pct"
         ],
     },
     "DayShift_Summary": {
@@ -85,8 +85,8 @@ EXPECTED_SHEETS = {
                      "day shift summary", "daily_summary", "dailysummary",
                      "daily summary"],
         "columns": [
-            "shift_date", "shift", "cases_per_hour", "oee_pct",
-            "total_cases", "total_hours", "hour_blocks"
+            "shift_date", "shift", "total_hours", "good_cases",
+            "bad_cases", "total_cases", "oee_pct"
         ],
     },
     "Shift_Summary": {
@@ -94,8 +94,8 @@ EXPECTED_SHEETS = {
                      "overall_summary", "overallsummary", "overall summary",
                      "summary"],
         "columns": [
-            "shift", "cases_per_hour", "oee_pct",
-            "total_cases", "total_hours", "n_intervals"
+            "shift", "total_hours", "good_cases",
+            "bad_cases", "total_cases", "oee_pct"
         ],
     },
     "ShiftHour_Summary": {
@@ -104,7 +104,7 @@ EXPECTED_SHEETS = {
                      "hour_summary", "hoursummary", "hour summary",
                      "houravg", "hour_avg", "hour avg"],
         "columns": [
-            "shift", "shift_hour", "time_block", "cases_per_hour", "oee_pct"
+            "shift", "shift_hour", "availability", "performance", "oee_pct"
         ],
     },
 }
@@ -136,6 +136,7 @@ _HEADER_TO_INTERNAL = {
     "blockstart": "block_start",
     "blockend": "block_end",
     # Volume / duration
+    "hours": "total_hours",
     "durationhours": "total_hours",
     "totalhours": "total_hours",
     "productcode": "product_code",
@@ -386,6 +387,14 @@ def load_oee_data(filepath):
     hour_avg = _coerce_numerics(hour_avg)
     hour_avg = _derive_columns(hour_avg)
 
+    # Filter out non-production rows (e.g. "No Shift")
+    _non_production = {"No Shift", "no shift"}
+    for _df in [hourly, shift_summary, overall, hour_avg]:
+        if "shift" in _df.columns:
+            mask = ~_df["shift"].astype(str).str.strip().isin(_non_production)
+            _df.drop(_df[~mask].index, inplace=True)
+            _df.reset_index(drop=True, inplace=True)
+
     print(f"  {len(hourly)} hourly records, {hourly['date_str'].nunique()} days")
     return hourly, shift_summary, overall, hour_avg
 
@@ -501,19 +510,34 @@ def build_shift_deep_dive(shift_name, hourly, shift_summary, hour_avg, overall, 
                  "Detail": f"Focus here first — it accounts for the biggest share of OEE loss on this shift"})
 
     # --- Section 2: Hour-by-Hour Pattern ---
+    has_cph = "cases_per_hour" in ha.columns and ha["cases_per_hour"].sum() > 0
+    has_avail = "availability" in ha.columns and "performance" in ha.columns
     rows.append({"Section": "", "Metric": "", "Value": "", "Detail": ""})
-    rows.append({"Section": "HOUR-BY-HOUR PATTERN", "Metric": "Hour", "Value": "Avg OEE %", "Detail": "Avg Cases/Hr"})
-    for _, hrow in ha.iterrows():
+    if has_cph:
+        rows.append({"Section": "HOUR-BY-HOUR PATTERN", "Metric": "Hour", "Value": "Avg OEE %", "Detail": "Avg Cases/Hr"})
+    else:
+        rows.append({"Section": "HOUR-BY-HOUR PATTERN", "Metric": "Hour", "Value": "Avg OEE %", "Detail": "Avail / Perf"})
+
+    ha_sorted = ha.sort_values("shift_hour")
+    for _, hrow in ha_sorted.iterrows():
+        hour_label = hrow["time_block"] if hrow.get("time_block") else f"{int(hrow['shift_hour'])}:00"
+        if has_cph:
+            detail = f"{hrow['cases_per_hour']:,.0f}"
+        elif has_avail:
+            detail = f"{hrow['availability']:.0%} / {hrow['performance']:.0%}"
+        else:
+            detail = ""
         rows.append({
-            "Section": "", "Metric": f"Hr {int(hrow['shift_hour'])} ({hrow['time_block']})",
+            "Section": "", "Metric": f"Hr {int(hrow['shift_hour'])} ({hour_label})",
             "Value": f"{hrow['oee_pct']:.1f}%",
-            "Detail": f"{hrow['cases_per_hour']:,.0f}"
+            "Detail": detail
         })
 
-    # First hour vs rest
-    if len(ha) > 1:
-        first_hr_oee = ha[ha["shift_hour"] == 1]["oee_pct"].values
-        rest_oee = ha[ha["shift_hour"] > 1]["oee_pct"].mean()
+    # First hour vs rest (use minimum hour in the shift, not hardcoded 1)
+    if len(ha_sorted) > 1:
+        min_hour = ha_sorted["shift_hour"].min()
+        first_hr_oee = ha_sorted[ha_sorted["shift_hour"] == min_hour]["oee_pct"].values
+        rest_oee = ha_sorted[ha_sorted["shift_hour"] != min_hour]["oee_pct"].mean()
         if len(first_hr_oee) > 0:
             gap = rest_oee - first_hr_oee[0]
             if gap > 2:
@@ -522,15 +546,24 @@ def build_shift_deep_dive(shift_name, hourly, shift_summary, hour_avg, overall, 
                              "Detail": f"First hour is {gap:.1f} OEE points below the rest of the shift"})
 
     # Best and worst hours
-    if len(ha) > 0:
-        best_hr = ha.loc[ha["oee_pct"].idxmax()]
-        worst_hr = ha.loc[ha["oee_pct"].idxmin()]
+    if len(ha_sorted) > 0:
+        best_hr = ha_sorted.loc[ha_sorted["oee_pct"].idxmax()]
+        worst_hr = ha_sorted.loc[ha_sorted["oee_pct"].idxmin()]
+        if has_cph:
+            best_detail = f"{best_hr['cases_per_hour']:,.0f} CPH"
+            worst_detail = f"{worst_hr['cases_per_hour']:,.0f} CPH"
+        elif has_avail:
+            best_detail = f"Avail {best_hr['availability']:.0%} / Perf {best_hr['performance']:.0%}"
+            worst_detail = f"Avail {worst_hr['availability']:.0%} / Perf {worst_hr['performance']:.0%}"
+        else:
+            best_detail = ""
+            worst_detail = ""
         rows.append({"Section": "", "Metric": "Best Hour",
                      "Value": f"Hr {int(best_hr['shift_hour'])} ({best_hr['oee_pct']:.1f}%)",
-                     "Detail": f"{best_hr['cases_per_hour']:,.0f} CPH"})
+                     "Detail": best_detail})
         rows.append({"Section": "", "Metric": "Worst Hour",
                      "Value": f"Hr {int(worst_hr['shift_hour'])} ({worst_hr['oee_pct']:.1f}%)",
-                     "Detail": f"{worst_hr['cases_per_hour']:,.0f} CPH"})
+                     "Detail": worst_detail})
 
     # --- Section 3: Day-by-Day Trend ---
     rows.append({"Section": "", "Metric": "", "Value": "", "Detail": ""})
@@ -780,13 +813,26 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
     # ===================================================================
     # TAB 5: SHIFT COMPARISON (side by side)
     # ===================================================================
-    shift_comp = overall.copy()
-    shift_comp["cases_per_hour"] = shift_comp["cases_per_hour"].round(0)
-    shift_comp["oee_pct"] = shift_comp["oee_pct"].round(1)
-    shift_comp["total_cases"] = shift_comp["total_cases"].round(0)
-    shift_comp["total_hours"] = shift_comp["total_hours"].round(1)
+    # Select core columns that exist, build a clean comparison table
+    comp_cols = ["shift", "oee_pct", "total_cases", "total_hours", "cases_per_hour"]
+    comp_cols = [c for c in comp_cols if c in overall.columns]
+    shift_comp = overall[comp_cols].copy()
+    for col in ["cases_per_hour", "total_cases", "total_hours"]:
+        if col in shift_comp.columns:
+            shift_comp[col] = shift_comp[col].round(0 if col != "total_hours" else 1)
+    if "oee_pct" in shift_comp.columns:
+        shift_comp["oee_pct"] = shift_comp["oee_pct"].round(1)
+    # Add good/bad cases if available
+    for col in ["good_cases", "bad_cases"]:
+        if col in overall.columns:
+            shift_comp[col] = overall[col].round(0)
     shift_comp = shift_comp.sort_values("oee_pct", ascending=False)
-    shift_comp.columns = ["Shift", "Cases/Hr", "OEE %", "Total Cases", "Total Hours", "Intervals"]
+    rename_map = {
+        "shift": "Shift", "oee_pct": "OEE %", "total_cases": "Total Cases",
+        "total_hours": "Total Hours", "cases_per_hour": "Cases/Hr",
+        "good_cases": "Good Cases", "bad_cases": "Bad Cases",
+    }
+    shift_comp = shift_comp.rename(columns=rename_map)
     results["Shift Comparison"] = shift_comp
 
     # ===================================================================
@@ -1038,9 +1084,18 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
         })
         priority += 1
 
-    # Startup
-    first_hour = hour_avg[hour_avg["shift_hour"] == 1]
-    other_hours = hour_avg[hour_avg["shift_hour"] > 1]
+    # Startup — compare each shift's first hour to the rest
+    # Uses minimum hour per shift (clock hours) rather than hardcoded shift_hour == 1
+    if "shift_hour" in hour_avg.columns:
+        shift_first_hours = hour_avg.groupby("shift")["shift_hour"].min()
+        first_mask = hour_avg.apply(
+            lambda r: r["shift_hour"] == shift_first_hours.get(r["shift"], -1), axis=1
+        )
+        first_hour = hour_avg[first_mask]
+        other_hours = hour_avg[~first_mask]
+    else:
+        first_hour = pd.DataFrame()
+        other_hours = pd.DataFrame()
     if len(first_hour) > 0 and len(other_hours) > 0:
         first_avg_oee = first_hour["oee_pct"].mean()
         other_avg_oee = other_hours["oee_pct"].mean()
