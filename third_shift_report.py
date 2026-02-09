@@ -17,7 +17,13 @@ from collections import Counter, defaultdict
 import pandas as pd
 import numpy as np
 
+from analyze import (
+    _smart_rename, _coerce_numerics, _derive_columns, EXPECTED_SHEETS,
+    excel_date_to_datetime,
+)
+
 EXCEL_EPOCH = datetime(1899, 12, 30)
+# Default shift names — auto-detected from data in build_report()
 SHIFT_3RD = "3rd (11p-7a)"
 SHIFT_2ND = "2nd (3p-11p)"
 SHIFT_1ST = "1st (7a-3p)"
@@ -148,39 +154,51 @@ def classify_fault(reason):
     return "Other"
 
 
-def excel_date_to_datetime(serial):
-    if pd.isna(serial):
-        return pd.NaT
-    if isinstance(serial, (pd.Timestamp, datetime)):
-        return serial
-    return EXCEL_EPOCH + timedelta(days=float(serial))
+def _detect_shift(actual_shifts, pattern):
+    """Find the actual shift name matching a pattern like '3rd'."""
+    for s in actual_shifts:
+        if pattern in s.lower():
+            return s
+    return None
 
 
 def load_data(oee_path, dt_path=None, product_path=None):
+    # --- DayShiftHour ---
     hourly = pd.read_excel(oee_path, sheet_name="DayShiftHour")
-    hourly.columns = [
-        "shift_date", "shift", "shift_hour", "time_block",
-        "block_start", "block_end", "cases_per_hour", "oee_pct",
-        "total_cases", "total_hours", "availability", "performance",
-        "quality", "intervals"
-    ]
+    hourly = _smart_rename(hourly, EXPECTED_SHEETS["DayShiftHour"]["columns"])
+    hourly = _coerce_numerics(hourly)
+    hourly = _derive_columns(hourly)
     hourly["date"] = hourly["shift_date"].apply(excel_date_to_datetime)
     hourly["date_str"] = hourly["date"].dt.strftime("%Y-%m-%d")
     hourly["day_of_week"] = hourly["date"].dt.day_name()
 
+    # --- DayShift_Summary ---
     shift_summary = pd.read_excel(oee_path, sheet_name="DayShift_Summary")
-    shift_summary.columns = [
-        "shift_date", "shift", "cases_per_hour", "oee_pct",
-        "total_cases", "total_hours", "hour_blocks"
-    ]
+    shift_summary = _smart_rename(shift_summary, EXPECTED_SHEETS["DayShift_Summary"]["columns"])
+    shift_summary = _coerce_numerics(shift_summary)
+    shift_summary = _derive_columns(shift_summary)
     shift_summary["date"] = shift_summary["shift_date"].apply(excel_date_to_datetime)
     shift_summary["date_str"] = shift_summary["date"].dt.strftime("%Y-%m-%d")
 
+    # --- Shift_Summary ---
     overall = pd.read_excel(oee_path, sheet_name="Shift_Summary")
-    overall.columns = ["shift", "cases_per_hour", "oee_pct", "total_cases", "total_hours", "n_intervals"]
+    overall = _smart_rename(overall, EXPECTED_SHEETS["Shift_Summary"]["columns"])
+    overall = _coerce_numerics(overall)
+    overall = _derive_columns(overall)
 
+    # --- ShiftHour_Summary ---
     hour_avg = pd.read_excel(oee_path, sheet_name="ShiftHour_Summary")
-    hour_avg.columns = ["shift", "shift_hour", "time_block", "cases_per_hour", "oee_pct"]
+    hour_avg = _smart_rename(hour_avg, EXPECTED_SHEETS["ShiftHour_Summary"]["columns"])
+    hour_avg = _coerce_numerics(hour_avg)
+    hour_avg = _derive_columns(hour_avg)
+
+    # Filter out non-production rows
+    _non_production = {"No Shift", "no shift"}
+    for _df in [hourly, shift_summary, overall, hour_avg]:
+        if "shift" in _df.columns:
+            mask = ~_df["shift"].astype(str).str.strip().isin(_non_production)
+            _df.drop(_df[~mask].index, inplace=True)
+            _df.reset_index(drop=True, inplace=True)
 
     downtime = None
     if dt_path and os.path.exists(dt_path):
@@ -231,13 +249,19 @@ def load_data(oee_path, dt_path=None, product_path=None):
 
 
 def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_data):
+    # Auto-detect shift names from data
+    actual_shifts = hourly["shift"].unique().tolist()
+    shift_3rd = _detect_shift(actual_shifts, "3rd") or SHIFT_3RD
+    shift_2nd = _detect_shift(actual_shifts, "2nd") or SHIFT_2ND
+    shift_1st = _detect_shift(actual_shifts, "1st") or SHIFT_1ST
+
     # Slice data
-    h3 = hourly[hourly["shift"] == SHIFT_3RD].copy()
-    h2 = hourly[hourly["shift"] == SHIFT_2ND].copy()
-    h1 = hourly[hourly["shift"] == SHIFT_1ST].copy()
-    ss3 = shift_summary[shift_summary["shift"] == SHIFT_3RD].copy()
-    ha3 = hour_avg[hour_avg["shift"] == SHIFT_3RD].copy()
-    ha2 = hour_avg[hour_avg["shift"] == SHIFT_2ND].copy()
+    h3 = hourly[hourly["shift"] == shift_3rd].copy()
+    h2 = hourly[hourly["shift"] == shift_2nd].copy()
+    h1 = hourly[hourly["shift"] == shift_1st].copy()
+    ss3 = shift_summary[shift_summary["shift"] == shift_3rd].copy()
+    ha3 = hour_avg[hour_avg["shift"] == shift_3rd].copy()
+    ha2 = hour_avg[hour_avg["shift"] == shift_2nd].copy()
 
     date_min = hourly["date"].min().strftime("%B %d, %Y")
     date_max = hourly["date"].max().strftime("%B %d, %Y")
@@ -254,7 +278,7 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
     s3_avail = h3["availability"].mean()
     s3_perf = h3["performance"].mean()
     s3_qual = h3["quality"].mean()
-    s3_cph = overall[overall["shift"] == SHIFT_3RD]["cases_per_hour"].values[0]
+    s3_cph = overall[overall["shift"] == shift_3rd]["cases_per_hour"].values[0]
     s3_cases = h3["total_cases"].sum()
     s3_hours = h3["total_hours"].sum()
 
@@ -262,11 +286,11 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
     s2_oee = h2["oee_pct"].mean()
     s2_avail = h2["availability"].mean()
     s2_perf = h2["performance"].mean()
-    s2_cph = overall[overall["shift"] == SHIFT_2ND]["cases_per_hour"].values[0]
+    s2_cph = overall[overall["shift"] == shift_2nd]["cases_per_hour"].values[0]
 
     # 1st shift
     s1_oee = h1["oee_pct"].mean()
-    s1_cph = overall[overall["shift"] == SHIFT_1ST]["cases_per_hour"].values[0]
+    s1_cph = overall[overall["shift"] == shift_1st]["cases_per_hour"].values[0]
 
     # Good hours benchmark
     good_hours = h3[h3["total_hours"] >= 0.5]
@@ -427,22 +451,27 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
     hbh.append({"Hour": "", "OEE %": "", "Cases/Hr": "", "Availability": "", "Performance": "", "Insight": ""})
 
     h3_hourly_avg = (
-        h3.groupby(["shift_hour", "time_block"])
+        h3.groupby("shift_hour")
         .agg(avg_oee=("oee_pct", "mean"), avg_cph=("cases_per_hour", "mean"),
              avg_avail=("availability", "mean"), avg_perf=("performance", "mean"),
              n=("oee_pct", "count"))
         .reset_index()
         .sort_values("shift_hour")
     )
+    # Add time_block label from shift_hour
+    h3_hourly_avg["time_block"] = h3_hourly_avg["shift_hour"].apply(
+        lambda h: f"{int(h)}:00" if pd.notna(h) else ""
+    )
 
     best_hr = h3_hourly_avg.loc[h3_hourly_avg["avg_oee"].idxmax()]
     worst_hr = h3_hourly_avg.loc[h3_hourly_avg["avg_oee"].idxmin()]
+    min_hour = h3_hourly_avg["shift_hour"].min()
 
     for _, row in h3_hourly_avg.iterrows():
         hr_num = int(row["shift_hour"])
         insight = ""
-        if hr_num == 1:
-            rest_avg = h3_hourly_avg[h3_hourly_avg["shift_hour"] > 1]["avg_oee"].mean()
+        if hr_num == min_hour:
+            rest_avg = h3_hourly_avg[h3_hourly_avg["shift_hour"] != min_hour]["avg_oee"].mean()
             gap = rest_avg - row["avg_oee"]
             if gap > 2:
                 insight = f"Startup: {gap:.0f} pts below rest of shift"
@@ -468,7 +497,8 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
     hbh.append({"Hour": "SAME HOURS — 2ND SHIFT COMPARISON", "OEE %": "", "Cases/Hr": "",
                 "Availability": "", "Performance": "", "Insight": ""})
 
-    for _, row in ha2.iterrows():
+    ha2_sorted = ha2.sort_values("shift_hour") if "shift_hour" in ha2.columns else ha2
+    for _, row in ha2_sorted.iterrows():
         hr_num = int(row["shift_hour"])
         h3_match = h3_hourly_avg[h3_hourly_avg["shift_hour"] == hr_num]
         gap = ""
@@ -476,12 +506,18 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
             diff = row["oee_pct"] - h3_match.iloc[0]["avg_oee"]
             gap = f"2nd is +{diff:.1f} pts" if diff > 0 else f"3rd is +{abs(diff):.1f} pts"
 
+        hour_label = row.get("time_block", f"{hr_num}:00") or f"{hr_num}:00"
+        has_cph_ha2 = "cases_per_hour" in ha2.columns and ha2["cases_per_hour"].sum() > 0
+        cph_val = f"{row['cases_per_hour']:,.0f}" if has_cph_ha2 else ""
+        avail_val = f"{row['availability']:.0%}" if "availability" in ha2.columns else ""
+        perf_val = f"{row['performance']:.0%}" if "performance" in ha2.columns else ""
+
         hbh.append({
-            "Hour": f"Hour {hr_num} ({row['time_block']})",
+            "Hour": f"Hour {hr_num} ({hour_label})",
             "OEE %": f"{row['oee_pct']:.1f}%",
-            "Cases/Hr": f"{row['cases_per_hour']:,.0f}",
-            "Availability": "",
-            "Performance": "",
+            "Cases/Hr": cph_val,
+            "Availability": avail_val,
+            "Performance": perf_val,
             "Insight": gap,
         })
 
@@ -492,7 +528,7 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
     # =================================================================
     dbd = []
     ss3_sorted = ss3.sort_values("date_str")
-    ss2 = shift_summary[shift_summary["shift"] == SHIFT_2ND].copy()
+    ss2 = shift_summary[shift_summary["shift"] == shift_2nd].copy()
 
     # If we have product data, build a date->product lookup
     date_product_map = {}
@@ -671,14 +707,15 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
     vs.append({"Metric": "HOUR-BY-HOUR GAP", "3rd Shift": "3rd OEE", "2nd Shift": "2nd OEE",
                "Difference": "Gap", "What This Means": ""})
 
-    for hr_num in range(1, 9):
-        h3_hr = h3_hourly_avg[h3_hourly_avg["shift_hour"] == hr_num]
+    # Compare all hours present in 3rd shift data with 2nd shift
+    for _, h3_row in h3_hourly_avg.iterrows():
+        hr_num = int(h3_row["shift_hour"])
         h2_hr = ha2[ha2["shift_hour"] == hr_num]
-        if len(h3_hr) > 0 and len(h2_hr) > 0:
-            h3_val = h3_hr.iloc[0]["avg_oee"]
+        if len(h2_hr) > 0:
+            h3_val = h3_row["avg_oee"]
             h2_val = h2_hr.iloc[0]["oee_pct"]
             gap = h2_val - h3_val
-            tb = h3_hr.iloc[0]["time_block"]
+            tb = h3_row["time_block"]
             note = ""
             if gap > 10:
                 note = "BIG GAP — investigate this hour"
@@ -1239,9 +1276,10 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
             })
             p += 1
 
-    # Startup
-    first_hr_oee = h3_hourly_avg[h3_hourly_avg["shift_hour"] == 1]["avg_oee"].values
-    rest_avg = h3_hourly_avg[h3_hourly_avg["shift_hour"] > 1]["avg_oee"].mean()
+    # Startup — use minimum hour in shift (clock hours), not hardcoded 1
+    _min_hr = h3_hourly_avg["shift_hour"].min() if len(h3_hourly_avg) > 0 else None
+    first_hr_oee = h3_hourly_avg[h3_hourly_avg["shift_hour"] == _min_hr]["avg_oee"].values if _min_hr is not None else np.array([])
+    rest_avg = h3_hourly_avg[h3_hourly_avg["shift_hour"] != _min_hr]["avg_oee"].mean() if _min_hr is not None else 0
     if len(first_hr_oee) > 0:
         startup_gap = rest_avg - first_hr_oee[0]
         if startup_gap > 3:
