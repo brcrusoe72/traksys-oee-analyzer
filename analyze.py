@@ -412,7 +412,10 @@ def load_downtime_data(json_path):
     if len(reasons_df) > 0:
         reasons_df["total_minutes"] = pd.to_numeric(reasons_df["total_minutes"], errors="coerce").fillna(0)
         reasons_df["total_occurrences"] = pd.to_numeric(reasons_df["total_occurrences"], errors="coerce").fillna(0)
-        reasons_df["total_hours"] = pd.to_numeric(reasons_df["total_hours"], errors="coerce").fillna(0)
+        if "total_hours" in reasons_df.columns:
+            reasons_df["total_hours"] = pd.to_numeric(reasons_df["total_hours"], errors="coerce").fillna(0)
+        else:
+            reasons_df["total_hours"] = reasons_df["total_minutes"] / 60.0
 
     pareto = kb.get("pareto_top_10", {})
     pareto_rankings = pareto.get("rankings", [])
