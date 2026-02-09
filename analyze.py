@@ -266,6 +266,43 @@ def _derive_columns(df):
     return df
 
 
+def _aggregate_oee(df):
+    """Calculate OEE components from aggregate totals, not averages of per-hour ratios.
+
+    Excludes intervals with zero scheduled time or zero production.
+    Returns (availability, performance, quality, oee) where A/P/Q are 0-1
+    fractions and OEE is 0-100 percentage.
+    """
+    mask = (df["total_hours"] > 0) & (df["total_cases"] > 0)
+    active = df[mask]
+
+    if len(active) == 0:
+        return 0.0, 0.0, 0.0, 0.0
+
+    # Availability = Sum(Production Time) / Sum(Scheduled Time)
+    # where Production Time per interval = availability_i * total_hours_i
+    scheduled_time = active["total_hours"].sum()
+    production_time = (active["availability"] * active["total_hours"]).sum()
+    availability = production_time / scheduled_time if scheduled_time > 0 else 0.0
+
+    # Performance weighted by production time
+    # = Sum(perf_i * production_time_i) / Sum(production_time_i)
+    performance = (
+        (active["performance"] * active["availability"] * active["total_hours"]).sum()
+        / production_time
+    ) if production_time > 0 else 0.0
+
+    # Quality = Sum(Good Cases) / Sum(Total Cases)
+    total_cases = active["total_cases"].sum()
+    good_cases = active["good_cases"].sum() if "good_cases" in active.columns else total_cases
+    quality = good_cases / total_cases if total_cases > 0 else 0.0
+
+    # OEE = A * P * Q (as 0-100 percentage)
+    oee = availability * performance * quality * 100
+
+    return availability, performance, quality, oee
+
+
 def _match_sheet(expected_name, available_sheets, already_matched):
     """Return the actual sheet name that best matches *expected_name*.
 
@@ -458,13 +495,10 @@ def build_shift_deep_dive(shift_name, hourly, shift_summary, hour_avg, overall, 
     # --- Section 1: Shift Scorecard ---
     rows.append({"Section": "SHIFT SCORECARD", "Metric": "", "Value": "", "Detail": ""})
 
-    shift_oee = sh["oee_pct"].mean()
-    shift_avail = sh["availability"].mean()
-    shift_perf = sh["performance"].mean()
-    shift_qual = sh["quality"].mean()
-    shift_cph = ov["cases_per_hour"].values[0] if len(ov) > 0 else sh["cases_per_hour"].mean()
+    shift_avail, shift_perf, shift_qual, shift_oee = _aggregate_oee(sh)
     shift_cases = sh["total_cases"].sum()
     shift_hours = sh["total_hours"].sum()
+    shift_cph = ov["cases_per_hour"].values[0] if len(ov) > 0 else (shift_cases / shift_hours if shift_hours > 0 else 0)
     n_days = sh["date_str"].nunique()
 
     oee_vs_plant = shift_oee - plant_avg_oee
@@ -592,11 +626,19 @@ def build_shift_deep_dive(shift_name, hourly, shift_summary, hour_avg, overall, 
     rows.append({"Section": "", "Metric": "", "Value": "", "Detail": ""})
     rows.append({"Section": "DAY OF WEEK", "Metric": "Day", "Value": "Avg OEE %", "Detail": "# Shift-Days"})
     dow_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
-    sh_dow = (
-        sh.groupby("day_of_week")
-        .agg(avg_oee=("oee_pct", "mean"), avg_cph=("cases_per_hour", "mean"), n_hours=("total_hours", "count"))
-        .reindex(dow_order).dropna(how="all")
-    )
+    sh_dow_rows = []
+    for day_name in dow_order:
+        day_data = sh[sh["day_of_week"] == day_name]
+        if len(day_data) == 0:
+            continue
+        _, _, _, day_oee = _aggregate_oee(day_data)
+        day_total_cases = day_data["total_cases"].sum()
+        day_total_hours = day_data["total_hours"].sum()
+        day_cph = day_total_cases / day_total_hours if day_total_hours > 0 else 0
+        n_hours = len(day_data)
+        sh_dow_rows.append({"day_of_week": day_name, "avg_oee": day_oee,
+                            "avg_cph": day_cph, "n_hours": n_hours})
+    sh_dow = pd.DataFrame(sh_dow_rows).set_index("day_of_week") if sh_dow_rows else pd.DataFrame()
     for day_name, drow in sh_dow.iterrows():
         rows.append({
             "Section": "", "Metric": day_name,
@@ -638,18 +680,20 @@ def build_shift_deep_dive(shift_name, hourly, shift_summary, hour_avg, overall, 
     # --- Section 6: Consistency Score ---
     rows.append({"Section": "", "Metric": "", "Value": "", "Detail": ""})
     rows.append({"Section": "CONSISTENCY", "Metric": "", "Value": "", "Detail": ""})
-    std_oee = sh["oee_pct"].std()
+    active_sh = sh[(sh["total_hours"] > 0) & (sh["total_cases"] > 0)]
+    std_oee = active_sh["oee_pct"].std() if len(active_sh) > 1 else 0
     rows.append({"Section": "", "Metric": "OEE Std Deviation",
                  "Value": f"{std_oee:.1f}",
                  "Detail": "Lower = more consistent. High variation means some hours are good, others collapse."})
 
-    pct_below_20 = (sh["oee_pct"] < 20).sum() / len(sh) * 100
-    pct_above_50 = (sh["oee_pct"] > 50).sum() / len(sh) * 100
+    n_active = len(active_sh)
+    pct_below_20 = (active_sh["oee_pct"] < 20).sum() / n_active * 100 if n_active > 0 else 0
+    pct_above_50 = (active_sh["oee_pct"] > 50).sum() / n_active * 100 if n_active > 0 else 0
     rows.append({"Section": "", "Metric": "Hours below 20% OEE",
-                 "Value": f"{(sh['oee_pct'] < 20).sum()} ({pct_below_20:.0f}%)",
+                 "Value": f"{(active_sh['oee_pct'] < 20).sum()} ({pct_below_20:.0f}%)",
                  "Detail": "These are near-zero production hours — investigate each one"})
     rows.append({"Section": "", "Metric": "Hours above 50% OEE",
-                 "Value": f"{(sh['oee_pct'] > 50).sum()} ({pct_above_50:.0f}%)",
+                 "Value": f"{(active_sh['oee_pct'] > 50).sum()} ({pct_above_50:.0f}%)",
                  "Detail": "Good hours — the line CAN run well. What's different?"})
 
     return pd.DataFrame(rows)
@@ -719,10 +763,7 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
     total_cases = hourly["total_cases"].sum()
     total_hours = hourly["total_hours"].sum()
     avg_cph = total_cases / total_hours if total_hours > 0 else 0
-    avg_oee = hourly["oee_pct"].mean()
-    avg_avail = hourly["availability"].mean()
-    avg_perf = hourly["performance"].mean()
-    avg_qual = hourly["quality"].mean()
+    avg_avail, avg_perf, avg_qual, avg_oee = _aggregate_oee(hourly)
 
     good_hours = hourly[hourly["total_hours"] >= 0.5]
     target_cph = good_hours["cases_per_hour"].quantile(0.90)
@@ -841,18 +882,22 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
     # ===================================================================
     # TAB 6: LOSS BREAKDOWN
     # ===================================================================
-    loss_by_shift = (
-        hourly.groupby("shift")
-        .agg(avg_availability=("availability", "mean"), avg_performance=("performance", "mean"),
-             avg_quality=("quality", "mean"), avg_oee=("oee_pct", "mean"),
-             total_cases_lost=("cases_gap", "sum"))
-        .reset_index()
-    )
+    loss_rows = []
+    for shift_name_lb in hourly["shift"].unique():
+        shift_data = hourly[hourly["shift"] == shift_name_lb]
+        sa, sp, sq, soee = _aggregate_oee(shift_data)
+        loss_rows.append({
+            "shift": shift_name_lb,
+            "avg_availability": sa,
+            "avg_performance": sp,
+            "avg_quality": sq,
+            "avg_oee": round(soee, 1),
+            "total_cases_lost": round(shift_data["cases_gap"].sum(), 0),
+        })
+    loss_by_shift = pd.DataFrame(loss_rows)
     loss_by_shift["avail_loss_%"] = ((1 - loss_by_shift["avg_availability"]) * 100).round(1)
     loss_by_shift["perf_loss_%"] = ((1 - loss_by_shift["avg_performance"]) * 100).round(1)
     loss_by_shift["qual_loss_%"] = ((1 - loss_by_shift["avg_quality"]) * 100).round(1)
-    loss_by_shift["avg_oee"] = loss_by_shift["avg_oee"].round(1)
-    loss_by_shift["total_cases_lost"] = loss_by_shift["total_cases_lost"].round(0)
 
     # Add primary loss driver per shift
     loss_by_shift["primary_loss"] = loss_by_shift.apply(
