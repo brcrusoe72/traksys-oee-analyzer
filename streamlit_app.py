@@ -20,7 +20,7 @@ import pandas as pd
 
 from analyze import load_oee_data, load_downtime_data, analyze, write_excel
 from parse_traksys import parse_oee_period_detail, parse_event_summary, detect_file_type
-from history import save_run, load_trends
+from oee_history import save_run, load_trends
 
 st.set_page_config(
     page_title="Traksys OEE Analyzer",
