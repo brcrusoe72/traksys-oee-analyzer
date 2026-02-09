@@ -20,7 +20,7 @@ import pandas as pd
 
 from analyze import load_oee_data, load_downtime_data, analyze, write_excel
 from parse_traksys import parse_oee_period_detail, parse_event_summary, detect_file_type
-from history import save_run, load_history
+from history import save_run, load_trends
 
 st.set_page_config(
     page_title="Traksys OEE Analyzer",
@@ -198,96 +198,150 @@ with tab_analyze:
         st.info("Upload a Traksys OEE export (.xlsx) to get started.")
 
 # =====================================================================
-# TAB 2: PLANT HISTORY
+# TAB 2: PLANT HISTORY (SPC + Gardener Intelligence)
 # =====================================================================
 with tab_history:
-    history = load_history()
+    trends = load_trends()
 
-    if history is None:
+    if trends is None:
         st.info("No history yet. Run an analysis on the Analyze tab to start building your trend data.")
     else:
-        runs = history["runs"]
-        shifts = history["shifts"]
-        downtime_hist = history["downtime"]
+        runs = pd.DataFrame(trends["runs"])
+        shifts = pd.DataFrame(trends.get("shifts", []))
+        downtime_hist = pd.DataFrame(trends.get("downtime", []))
+        spc = trends.get("spc", {})
+        wow = trends.get("week_over_week")
+        dt_classes = trends.get("downtime_classifications", [])
+        shift_trends = trends.get("shift_trends", {})
+        determinations = trends.get("determinations", [])
 
-        n_runs = len(runs)
-        total_days = int(runs["n_days"].sum())
-        latest_oee = runs.iloc[-1]["avg_oee"]
-        first_oee = runs.iloc[0]["avg_oee"]
-        oee_delta = latest_oee - first_oee
+        n_runs = trends["total_runs"]
+        dupes = trends.get("duplicates_removed", 0)
+        total_days = int(runs["n_days"].sum()) if len(runs) > 0 else 0
+        latest_oee = float(runs.iloc[-1]["avg_oee"]) if len(runs) > 0 else 0
 
-        if oee_delta > 1:
-            trend_dir = "Improving"
-        elif oee_delta < -1:
-            trend_dir = "Declining"
-        else:
-            trend_dir = "Flat"
-
-        # --- Key stats ---
+        # --- Overview metrics ---
         st.subheader("Overview")
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Runs Analyzed", n_runs)
         c2.metric("Total Days Covered", total_days)
         c3.metric("Latest OEE", f"{latest_oee:.1f}%")
-        c4.metric("OEE Trend", trend_dir, delta=f"{oee_delta:+.1f} pts" if n_runs > 1 else None)
+        if wow:
+            delta_str = f"{wow['oee_delta']:+.1f} pts"
+            c4.metric("vs Previous Run", f"{latest_oee:.1f}%", delta=delta_str)
+        else:
+            c4.metric("Control Status", "Building..." if n_runs < 3 else "Active")
 
-        # --- OEE Trend Chart ---
-        st.subheader("OEE Over Time")
-        oee_chart = runs[["date_from", "avg_oee"]].copy()
-        oee_chart = oee_chart.rename(columns={"date_from": "Period Start", "avg_oee": "OEE %"})
-        oee_chart = oee_chart.set_index("Period Start")
+        if dupes > 0:
+            st.caption(f"{dupes} duplicate run(s) removed (same date range re-analyzed)")
 
-        if n_runs >= 7:
-            oee_chart["7-Run Avg"] = oee_chart["OEE %"].rolling(7, min_periods=1).mean()
+        # --- Determinations (the intelligence layer) ---
+        if determinations:
+            st.subheader("Determinations")
+            st.markdown("*Auto-generated findings from SPC analysis, trend tests, and pattern detection.*")
+            for finding in determinations:
+                if "CHRONIC" in finding:
+                    st.markdown(f"- :red[**{finding}**]")
+                elif "EMERGING" in finding:
+                    st.markdown(f"- :orange[**{finding}**]")
+                elif "below" in finding.lower() and ("control limit" in finding.lower() or "decline" in finding.lower()):
+                    st.markdown(f"- :red[{finding}]")
+                elif "improving" in finding.lower() or "above" in finding.lower():
+                    st.markdown(f"- :green[{finding}]")
+                else:
+                    st.markdown(f"- {finding}")
 
-        st.line_chart(oee_chart)
+        # --- OEE Control Chart (SPC) ---
+        if len(runs) > 0:
+            st.subheader("OEE Control Chart")
+            oee_chart = runs[["date_from", "avg_oee"]].copy()
+            oee_chart = oee_chart.rename(columns={"date_from": "Period", "avg_oee": "OEE %"})
+            oee_chart = oee_chart.set_index("Period")
+
+            if spc:
+                oee_chart["Mean"] = spc["mean"]
+                oee_chart["UCL (+3σ)"] = spc["ucl"]
+                oee_chart["LCL (-3σ)"] = spc["lcl"]
+
+            if n_runs >= 7:
+                oee_chart["7-Run Avg"] = oee_chart["OEE %"].rolling(7, min_periods=1).mean()
+
+            st.line_chart(oee_chart)
+
+            if spc:
+                st.caption(
+                    f"Control limits: UCL={spc['ucl']:.1f}% | Mean={spc['mean']:.1f}% | "
+                    f"LCL={spc['lcl']:.1f}% | σ={spc['sigma']:.2f}")
 
         # --- A / P / Q Breakdown ---
-        if n_runs > 1:
+        if n_runs > 1 and len(runs) > 1:
             st.subheader("Availability / Performance / Quality")
             apq_chart = runs[["date_from", "avg_availability", "avg_performance", "avg_quality"]].copy()
             apq_chart = apq_chart.rename(columns={
-                "date_from": "Period Start",
+                "date_from": "Period",
                 "avg_availability": "Availability %",
                 "avg_performance": "Performance %",
                 "avg_quality": "Quality %",
             })
-            apq_chart = apq_chart.set_index("Period Start")
+            apq_chart = apq_chart.set_index("Period")
             st.line_chart(apq_chart)
 
-        # --- Shift OEE Comparison ---
-        if len(shifts) > 0 and n_runs > 1:
-            st.subheader("Shift OEE Comparison")
-            shift_pivot = shifts.pivot_table(
-                index="date_from", columns="shift", values="oee_pct", aggfunc="first"
-            )
-            shift_pivot.index.name = "Period Start"
-            st.line_chart(shift_pivot)
+        # --- Shift Trends ---
+        if shift_trends:
+            st.subheader("Shift Trends")
+            shift_rows = []
+            for sname, sdata in shift_trends.items():
+                icon = {"improving": "+", "declining": "-", "stable": "="}
+                shift_rows.append({
+                    "Shift": sname,
+                    "Current OEE": f"{sdata['current_oee']:.1f}%",
+                    "4-Run Avg": f"{sdata['4run_avg']:.1f}%",
+                    "Direction": sdata["direction"].title(),
+                    "Below Plant Mean": f"{sdata['runs_below_plant_mean']}/{sdata['total_runs']} runs",
+                })
+            st.dataframe(pd.DataFrame(shift_rows), use_container_width=True, hide_index=True)
 
-        # --- Recurring Downtime Causes ---
-        if len(downtime_hist) > 0:
-            st.subheader("Recurring Downtime Causes (Across All Runs)")
-            agg_dt = (
-                downtime_hist.groupby("cause")
-                .agg(total_minutes=("minutes", "sum"), appearances=("run_id", "nunique"))
-                .sort_values("total_minutes", ascending=False)
-                .head(10)
-                .reset_index()
-            )
-            agg_dt.columns = ["Cause", "Total Minutes (All Runs)", "# Runs Appeared"]
-            st.dataframe(agg_dt, use_container_width=True, hide_index=True)
+            # Shift OEE over time chart
+            if len(shifts) > 0 and n_runs > 1:
+                shift_pivot = shifts.pivot_table(
+                    index="date_from", columns="shift", values="oee_pct", aggfunc="first"
+                )
+                shift_pivot.index.name = "Period"
+                st.line_chart(shift_pivot)
+
+        # --- Downtime Intelligence ---
+        if dt_classes:
+            st.subheader("Downtime Intelligence")
+            dt_display = []
+            for d in dt_classes[:10]:
+                status_label = d["status"].upper()
+                dt_display.append({
+                    "Cause": d["cause"],
+                    "Status": status_label,
+                    "Appearances": f"{d['appearances']}/{n_runs} runs",
+                    "Streak": f"{d['current_streak']} consecutive",
+                    "Total Minutes": f"{d['total_minutes']:,.0f}",
+                    "Times #1": d["times_rank1"],
+                })
+            st.dataframe(pd.DataFrame(dt_display), use_container_width=True, hide_index=True)
 
             # Bar chart of top causes
-            bar_data = agg_dt.set_index("Cause")["Total Minutes (All Runs)"].head(7)
-            st.bar_chart(bar_data)
+            if len(downtime_hist) > 0:
+                agg_dt = (
+                    downtime_hist.groupby("cause")["minutes"]
+                    .sum().sort_values(ascending=False).head(7)
+                )
+                agg_dt.index.name = "Cause"
+                st.bar_chart(agg_dt)
 
-        # --- Run History Table ---
+        # --- Run Log ---
         st.subheader("Run Log")
-        display_runs = runs[["run_id", "date_from", "date_to", "n_days",
-                             "avg_oee", "avg_cph", "total_cases", "cases_lost"]].copy()
-        display_runs.columns = ["Run", "From", "To", "Days", "OEE %", "CPH", "Cases", "Cases Lost"]
-        display_runs["Run"] = display_runs["Run"].str[:19]  # trim to readable timestamp
-        st.dataframe(display_runs, use_container_width=True, hide_index=True)
+        if len(runs) > 0:
+            display_runs = runs[["run_id", "date_from", "date_to", "n_days",
+                                 "avg_oee", "avg_cph", "total_cases", "cases_lost"]].copy()
+            display_runs.columns = ["Run", "From", "To", "Days", "OEE %", "CPH", "Cases", "Cases Lost"]
+            display_runs["Run"] = display_runs["Run"].astype(str).str[:19]
+            st.dataframe(display_runs, use_container_width=True, hide_index=True)
 
 # --- Footer ---
 st.markdown("---")
