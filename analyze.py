@@ -522,14 +522,15 @@ def build_shift_deep_dive(shift_name, hourly, shift_summary, hour_avg, overall, 
                              "Detail": f"First hour is {gap:.1f} OEE points below the rest of the shift"})
 
     # Best and worst hours
-    best_hr = ha.loc[ha["oee_pct"].idxmax()]
-    worst_hr = ha.loc[ha["oee_pct"].idxmin()]
-    rows.append({"Section": "", "Metric": "Best Hour",
-                 "Value": f"Hr {int(best_hr['shift_hour'])} ({best_hr['oee_pct']:.1f}%)",
-                 "Detail": f"{best_hr['cases_per_hour']:,.0f} CPH"})
-    rows.append({"Section": "", "Metric": "Worst Hour",
-                 "Value": f"Hr {int(worst_hr['shift_hour'])} ({worst_hr['oee_pct']:.1f}%)",
-                 "Detail": f"{worst_hr['cases_per_hour']:,.0f} CPH"})
+    if len(ha) > 0:
+        best_hr = ha.loc[ha["oee_pct"].idxmax()]
+        worst_hr = ha.loc[ha["oee_pct"].idxmin()]
+        rows.append({"Section": "", "Metric": "Best Hour",
+                     "Value": f"Hr {int(best_hr['shift_hour'])} ({best_hr['oee_pct']:.1f}%)",
+                     "Detail": f"{best_hr['cases_per_hour']:,.0f} CPH"})
+        rows.append({"Section": "", "Metric": "Worst Hour",
+                     "Value": f"Hr {int(worst_hr['shift_hour'])} ({worst_hr['oee_pct']:.1f}%)",
+                     "Detail": f"{worst_hr['cases_per_hour']:,.0f} CPH"})
 
     # --- Section 3: Day-by-Day Trend ---
     rows.append({"Section": "", "Metric": "", "Value": "", "Detail": ""})
