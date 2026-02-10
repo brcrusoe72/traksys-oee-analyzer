@@ -18,85 +18,20 @@ import pandas as pd
 import numpy as np
 
 from analyze import (
-    _smart_rename, _coerce_numerics, _derive_columns, EXPECTED_SHEETS,
-    excel_date_to_datetime,
+    _smart_rename, _coerce_numerics, _derive_columns, _aggregate_oee,
+    _resolve_sheets, EXPECTED_SHEETS, excel_date_to_datetime,
+)
+from shared import (
+    EXCLUDE_REASONS, EQUIPMENT_KEYWORDS, classify_fault,
+    PRODUCT_NORMALIZE, normalize_product,
+    PRODUCT_RATED_SPEED, PRODUCT_PACK_TYPE,
 )
 
-EXCEL_EPOCH = datetime(1899, 12, 30)
 # Default shift names — auto-detected from data in build_report()
 SHIFT_3RD = "3rd (11p-7a)"
 SHIFT_2ND = "2nd (3p-11p)"
 SHIFT_1ST = "1st (7a-3p)"
 LINE_NAME = "Line 2 - Flex (Labeling)"
-
-EXCLUDE_REASONS = {"Not Scheduled", "Break-Lunch", "Lunch (Comida)", "Meetings"}
-
-EQUIPMENT_KEYWORDS = [
-    "caser", "palletizer", "conveyor", "tray packer", "shrink tunnel",
-    "labeler", "wrapper", "depal", "spiral", "x-ray", "printer",
-    "ryson", "whallon", "bear", "diagraph", "domino", "highlight",
-    "inspec", "kayat", "pai", "riverwood", "laner", "filler",
-    "seamer", "closer", "feeder", "hopper", "accumulator",
-]
-
-# ── Product name normalization ──────────────────────────────────────
-# Operator-entered names are inconsistent. Map them to clean families.
-PRODUCT_NORMALIZE = {
-    # Cut Green Beans 8pk (1200 cpm)
-    "dm cut gr bn": "Cut Green Beans 8pk",
-    "dm cut grn beans": "Cut Green Beans 8pk",
-    "dm cut grn bean": "Cut Green Beans 8pk",
-    # Cut Green Beans 12pk (1200 cpm)
-    "dm cut gr bn 12pk": "Cut Green Beans 12pk",
-    "dm cut gr gn 12pk": "Cut Green Beans 12pk",
-    "dm cut grn bean 12pk": "Cut Green Beans 12pk",
-    # WK Corn 12pk (1200 cpm)
-    "dm wk corn 12pk": "WK Corn 12pk",
-    "dm wk corn": "WK Corn 12pk",
-    # WK Gold Corn 8pk (1200 cpm)
-    "dm wk gold corn": "WK Gold Corn 8pk",
-    "dm wk gold corn 12pk": "WK Gold Corn 8pk",
-    "dm wk gld corn": "WK Gold Corn 8pk",
-    # Sweet Peas 8pk (1200 cpm)
-    "dm swt peas": "Sweet Peas 8pk",
-    # Sliced Peaches trayed (572 cpm)
-    "dm slc yc peaches jce sams": "Sliced Peaches (trayed)",
-    "dm slc peaches jce sams": "Sliced Peaches (trayed)",
-    "dm slc yc peaches jce": "Sliced Peaches (trayed)",
-    "dm sliced pch 100 jc": "Sliced Peaches (trayed)",
-    # Pears trayed (720 cpm)
-    "dm sliced pears": "Pears (trayed)",
-    "dm pear halves": "Pears (trayed)",
-    "dm sliced pears nsa": "Pears (trayed)",
-    # Mexican Style Corn (1200 cpm)
-    "dm mexican style sw corn": "Mexican Style Corn",
-    # Whole Kernel Corn trayed (572 cpm)
-    "dm whole kernel corn": "WK Corn (trayed)",
-}
-
-PRODUCT_RATED_SPEED = {
-    "Cut Green Beans 8pk": 1200,
-    "Cut Green Beans 12pk": 1200,
-    "WK Corn 12pk": 1200,
-    "WK Gold Corn 8pk": 1200,
-    "Sweet Peas 8pk": 1200,
-    "Sliced Peaches (trayed)": 572,
-    "Pears (trayed)": 720,
-    "Mexican Style Corn": 1200,
-    "WK Corn (trayed)": 572,
-}
-
-PRODUCT_PACK_TYPE = {
-    "Cut Green Beans 8pk": "Standard (8pk)",
-    "Cut Green Beans 12pk": "Standard (12pk)",
-    "WK Corn 12pk": "Standard (12pk)",
-    "WK Gold Corn 8pk": "Standard (8pk)",
-    "Sweet Peas 8pk": "Standard (8pk)",
-    "Sliced Peaches (trayed)": "Trayed (6/4)",
-    "Pears (trayed)": "Trayed (6/4)",
-    "Mexican Style Corn": "Standard (8pk)",
-    "WK Corn (trayed)": "Trayed (6/4)",
-}
 
 # Equipment names to scan for in operator notes
 # NOTE: Riverwood, Kayat (tray packer, shrink tunnel, wrapper), and caser
@@ -119,14 +54,6 @@ EQUIPMENT_SCAN = {
 }
 
 
-def normalize_product(name):
-    """Map messy operator-entered product names to clean family names."""
-    if not name or pd.isna(name):
-        return "Unknown"
-    key = name.strip().lower()
-    return PRODUCT_NORMALIZE.get(key, name.strip())
-
-
 def extract_equipment_mentions(notes):
     """Scan operator notes for equipment names. Returns list of equipment mentioned."""
     if not notes or pd.isna(notes):
@@ -139,21 +66,6 @@ def extract_equipment_mentions(notes):
     return found
 
 
-def classify_fault(reason):
-    r = reason.lower().strip()
-    if any(kw in r for kw in ["unassigned", "unknown"]):
-        return "Data Gap"
-    if any(kw in r for kw in ["not scheduled", "break", "lunch", "meeting", "comida"]):
-        return "Scheduled"
-    if "short stop" in r:
-        return "Micro Stops"
-    if any(kw in r for kw in ["day code", "changeover", "startup", "shutdown", "cip", "sanitation", "clean", "setup"]):
-        return "Process / Changeover"
-    if any(kw in r for kw in EQUIPMENT_KEYWORDS) or " - " in r or "-" in r:
-        return "Equipment / Mechanical"
-    return "Other"
-
-
 def _detect_shift(actual_shifts, pattern):
     """Find the actual shift name matching a pattern like '3rd'."""
     for s in actual_shifts:
@@ -163,42 +75,9 @@ def _detect_shift(actual_shifts, pattern):
 
 
 def load_data(oee_path, dt_path=None, product_path=None):
-    # --- DayShiftHour ---
-    hourly = pd.read_excel(oee_path, sheet_name="DayShiftHour")
-    hourly = _smart_rename(hourly, EXPECTED_SHEETS["DayShiftHour"]["columns"])
-    hourly = _coerce_numerics(hourly)
-    hourly = _derive_columns(hourly)
-    hourly["date"] = hourly["shift_date"].apply(excel_date_to_datetime)
-    hourly["date_str"] = hourly["date"].dt.strftime("%Y-%m-%d")
-    hourly["day_of_week"] = hourly["date"].dt.day_name()
-
-    # --- DayShift_Summary ---
-    shift_summary = pd.read_excel(oee_path, sheet_name="DayShift_Summary")
-    shift_summary = _smart_rename(shift_summary, EXPECTED_SHEETS["DayShift_Summary"]["columns"])
-    shift_summary = _coerce_numerics(shift_summary)
-    shift_summary = _derive_columns(shift_summary)
-    shift_summary["date"] = shift_summary["shift_date"].apply(excel_date_to_datetime)
-    shift_summary["date_str"] = shift_summary["date"].dt.strftime("%Y-%m-%d")
-
-    # --- Shift_Summary ---
-    overall = pd.read_excel(oee_path, sheet_name="Shift_Summary")
-    overall = _smart_rename(overall, EXPECTED_SHEETS["Shift_Summary"]["columns"])
-    overall = _coerce_numerics(overall)
-    overall = _derive_columns(overall)
-
-    # --- ShiftHour_Summary ---
-    hour_avg = pd.read_excel(oee_path, sheet_name="ShiftHour_Summary")
-    hour_avg = _smart_rename(hour_avg, EXPECTED_SHEETS["ShiftHour_Summary"]["columns"])
-    hour_avg = _coerce_numerics(hour_avg)
-    hour_avg = _derive_columns(hour_avg)
-
-    # Filter out non-production rows
-    _non_production = {"No Shift", "no shift"}
-    for _df in [hourly, shift_summary, overall, hour_avg]:
-        if "shift" in _df.columns:
-            mask = ~_df["shift"].astype(str).str.strip().isin(_non_production)
-            _df.drop(_df[~mask].index, inplace=True)
-            _df.reset_index(drop=True, inplace=True)
+    # Use fuzzy sheet matching from analyze.py (supports renamed/variant sheets)
+    from analyze import load_oee_data
+    hourly, shift_summary, overall, hour_avg = load_oee_data(oee_path)
 
     downtime = None
     if dt_path and os.path.exists(dt_path):
@@ -267,29 +146,22 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
     date_max = hourly["date"].max().strftime("%B %d, %Y")
     n_days = h3["date_str"].nunique()
 
-    # Plant averages
-    plant_oee = hourly["oee_pct"].mean()
+    # Plant averages (production-weighted)
+    plant_avail, plant_perf, plant_qual, plant_oee = _aggregate_oee(hourly)
     plant_cph = hourly["total_cases"].sum() / hourly["total_hours"].sum()
-    plant_avail = hourly["availability"].mean()
-    plant_perf = hourly["performance"].mean()
 
-    # 3rd shift metrics
-    s3_oee = h3["oee_pct"].mean()
-    s3_avail = h3["availability"].mean()
-    s3_perf = h3["performance"].mean()
-    s3_qual = h3["quality"].mean()
+    # 3rd shift metrics (production-weighted)
+    s3_avail, s3_perf, s3_qual, s3_oee = _aggregate_oee(h3)
     s3_cph = overall[overall["shift"] == shift_3rd]["cases_per_hour"].values[0]
     s3_cases = h3["total_cases"].sum()
     s3_hours = h3["total_hours"].sum()
 
-    # 2nd shift metrics (benchmark)
-    s2_oee = h2["oee_pct"].mean()
-    s2_avail = h2["availability"].mean()
-    s2_perf = h2["performance"].mean()
+    # 2nd shift metrics (production-weighted, benchmark)
+    s2_avail, s2_perf, s2_qual, s2_oee = _aggregate_oee(h2)
     s2_cph = overall[overall["shift"] == shift_2nd]["cases_per_hour"].values[0]
 
-    # 1st shift
-    s1_oee = h1["oee_pct"].mean()
+    # 1st shift (production-weighted)
+    _s1_avail, _s1_perf, _s1_qual, s1_oee = _aggregate_oee(h1)
     s1_cph = overall[overall["shift"] == shift_1st]["cases_per_hour"].values[0]
 
     # Good hours benchmark
@@ -402,7 +274,8 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
                       f"-{(s2_avail - s3_avail)*100:.1f} pts"))
     sc.append(sc_row("Performance", f"{s3_perf:.1%}", f"{plant_perf:.1%}", f"{s2_perf:.1%}",
                       f"-{(s2_perf - s3_perf)*100:.1f} pts"))
-    sc.append(sc_row("Quality", f"{s3_qual:.1%}", "99.6%", "99.6%", "0.0 pts"))
+    sc.append(sc_row("Quality", f"{s3_qual:.1%}", f"{plant_qual:.1%}", f"{s2_qual:.1%}",
+                      f"-{(s2_qual - s3_qual)*100:.1f} pts"))
     sc.append({"Metric": "", "3rd Shift": "", "Plant Avg": "", "2nd Shift (Best)": "", "Gap vs 2nd": ""})
     sc.append(sc_row("Cases/Hour", f"{s3_cph:,.0f}", f"{plant_cph:,.0f}", f"{s2_cph:,.0f}",
                       f"-{s2_cph - s3_cph:,.0f} CPH"))
@@ -796,9 +669,9 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
             "Equipment / Mechanical": "Maintenance / Reliability team",
             "Micro Stops": "Engineering + Operators — sensor tuning, line adjustments, guide rails",
             "Process / Changeover": "CI / Operations — SMED, standard work, pre-staging",
-            "Scheduled": "Planning / Management — optimize schedule, reduce non-production windows",
-            "Data Gap": "Supervisors — enforce reason code entry, simplify code tree",
-            "Other": "Review and reclassify these reason codes",
+            "Scheduled / Non-Production": "Planning / Management — optimize schedule, reduce non-production windows",
+            "Data Gap (uncoded)": "Supervisors — enforce reason code entry, simplify code tree",
+            "Other / Unclassified": "Review and reclassify these reason codes",
         }
         fault_sum["owner"] = fault_sum["fault_type"].map(ownership).fillna("TBD")
 
@@ -806,9 +679,9 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
             "Equipment / Mechanical": "Are PMs current? What parts keep failing? Is there a pattern by shift/day?",
             "Micro Stops": "Where on the line do short stops happen most? What sensor or transfer point?",
             "Process / Changeover": "How long is the average changeover? What steps take the longest?",
-            "Scheduled": "Can non-production windows be reduced or shifted to lower-demand periods?",
-            "Data Gap": "Why aren't operators coding these? Is the reason code list too long or confusing?",
-            "Other": "These need to be reviewed and categorized properly.",
+            "Scheduled / Non-Production": "Can non-production windows be reduced or shifted to lower-demand periods?",
+            "Data Gap (uncoded)": "Why aren't operators coding these? Is the reason code list too long or confusing?",
+            "Other / Unclassified": "These need to be reviewed and categorized properly.",
         }
         fault_sum["question_to_ask"] = fault_sum["fault_type"].map(what_to_ask).fillna("")
 

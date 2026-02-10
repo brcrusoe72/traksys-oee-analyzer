@@ -17,57 +17,10 @@ from collections import Counter, defaultdict
 import pandas as pd
 import numpy as np
 
-# ── Product name normalization ──────────────────────────────────────
-PRODUCT_NORMALIZE = {
-    "dm cut gr bn": "Cut Green Beans 8pk",
-    "dm cut grn beans": "Cut Green Beans 8pk",
-    "dm cut grn bean": "Cut Green Beans 8pk",
-    "dm cut gr bn 12pk": "Cut Green Beans 12pk",
-    "dm cut gr gn 12pk": "Cut Green Beans 12pk",
-    "dm cut grn bean 12pk": "Cut Green Beans 12pk",
-    "dm wk corn 12pk": "WK Corn 12pk",
-    "dm wk corn": "WK Corn 12pk",
-    "dm wk gold corn": "WK Gold Corn 8pk",
-    "dm wk gold corn 12pk": "WK Gold Corn 8pk",
-    "dm wk gld corn": "WK Gold Corn 8pk",
-    "dm swt peas": "Sweet Peas 8pk",
-    "dm slc yc peaches jce sams": "Sliced Peaches (trayed)",
-    "dm slc peaches jce sams": "Sliced Peaches (trayed)",
-    "dm slc yc peaches jce": "Sliced Peaches (trayed)",
-    "dm sliced pch 100 jc": "Sliced Peaches (trayed)",
-    "dm sliced pears": "Pears (trayed)",
-    "dm pear halves": "Pears (trayed)",
-    "dm sliced pears nsa": "Pears (trayed)",
-    "dm mexican style sw corn": "Mexican Style Corn",
-    "dm whole kernel corn": "WK Corn (trayed)",
-}
-
-# Per-shift case targets
-PRODUCT_TARGET = {
-    "Cut Green Beans 8pk": 30000,
-    "Cut Green Beans 12pk": 25000,
-    "WK Corn 12pk": 25000,
-    "WK Gold Corn 8pk": 30000,
-    "Sweet Peas 8pk": 30000,
-    "Mexican Style Corn": 30000,
-    "Sliced Peaches (trayed)": 5000,
-    "Pears (trayed)": 10000,
-    "WK Corn (trayed)": 5000,
-}
-
-PRODUCT_PACK = {
-    "Cut Green Beans 8pk": "8pk",
-    "Cut Green Beans 12pk": "12pk",
-    "WK Corn 12pk": "12pk",
-    "WK Gold Corn 8pk": "8pk",
-    "Sweet Peas 8pk": "8pk",
-    "Mexican Style Corn": "8pk",
-    "Sliced Peaches (trayed)": "Trayed",
-    "Pears (trayed)": "Trayed",
-    "WK Corn (trayed)": "Trayed",
-}
-
-IS_TRAYED = {k for k, v in PRODUCT_PACK.items() if v == "Trayed"}
+from shared import (
+    PRODUCT_NORMALIZE, normalize_product, PRODUCT_TARGET, PRODUCT_PACK,
+    IS_TRAYED,
+)
 
 # Equipment scanning from operator notes
 # Riverwood runs ALL products. Full caser system (Kayat) only runs trayed.
@@ -101,12 +54,6 @@ EQUIPMENT_SCAN = {
     "Stacker": ["double stacker", "case stacker"],
     "X-Ray": ["x-ray", "x ray"],
 }
-
-
-def normalize_product(name):
-    if not name or pd.isna(name):
-        return "Unknown"
-    return PRODUCT_NORMALIZE.get(name.strip().lower(), name.strip())
 
 
 def extract_equipment(notes):

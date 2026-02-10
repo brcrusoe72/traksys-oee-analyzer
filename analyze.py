@@ -16,6 +16,8 @@ from datetime import datetime, timedelta
 import pandas as pd
 import numpy as np
 
+from shared import EXCLUDE_REASONS, EQUIPMENT_KEYWORDS, classify_fault
+
 # ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
@@ -28,42 +30,6 @@ def _weighted_mean(values, weights):
     if not mask.any():
         return 0.0
     return float((values[mask] * weights[mask]).sum() / weights[mask].sum())
-EXCLUDE_REASONS = {"Not Scheduled", "Break-Lunch", "Lunch (Comida)", "Meetings"}
-
-# Fault classification keywords — used to bucket reason codes
-EQUIPMENT_KEYWORDS = [
-    "caser", "palletizer", "conveyor", "tray packer", "shrink tunnel",
-    "labeler", "wrapper", "depal", "spiral", "x-ray", "printer",
-    "ryson", "whallon", "bear", "diagraph", "domino", "highlight",
-    "inspec", "kayat", "pai", "riverwood", "laner", "filler",
-    "seamer", "closer", "feeder", "hopper", "accumulator",
-]
-PROCESS_KEYWORDS = [
-    "day code", "changeover", "startup", "shutdown", "cip",
-    "sanitation", "clean", "setup", "product change", "sku change",
-]
-SCHEDULED_KEYWORDS = [
-    "not scheduled", "break", "lunch", "meeting", "comida", "training",
-]
-
-
-def classify_fault(reason):
-    """Classify a downtime reason into a fault category."""
-    r = reason.lower().strip()
-    if any(kw in r for kw in ["unassigned", "unknown"]):
-        return "Data Gap (uncoded)"
-    if any(kw in r for kw in SCHEDULED_KEYWORDS):
-        return "Scheduled / Non-Production"
-    if "short stop" in r:
-        return "Micro Stops"
-    if any(kw in r for kw in PROCESS_KEYWORDS):
-        return "Process / Changeover"
-    if any(kw in r for kw in EQUIPMENT_KEYWORDS):
-        return "Equipment / Mechanical"
-    # Default: if it has a dash (like "Machine - Brand"), assume equipment
-    if " - " in r or "-" in r:
-        return "Equipment / Mechanical"
-    return "Other / Unclassified"
 
 
 def excel_date_to_datetime(serial):

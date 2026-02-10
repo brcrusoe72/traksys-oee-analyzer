@@ -13,6 +13,7 @@ Usage:
 
 import streamlit as st
 import tempfile
+import shutil
 import os
 from datetime import datetime
 
@@ -34,8 +35,8 @@ from third_shift_targets import (
     build_sheet2,
     write_report as write_targets_report,
     build_sendable,
-    PRODUCT_TARGET,
 )
+from shared import PRODUCT_TARGET
 
 st.set_page_config(
     page_title="Traksys OEE Analyzer",
@@ -76,14 +77,13 @@ with tab_analyze:
             with st.spinner("Running analysis..."):
                 # Write uploaded files to temp directory
                 tmp_dir = tempfile.mkdtemp()
-                oee_path = os.path.join(tmp_dir, oee_file.name)
-                with open(oee_path, "wb") as f:
-                    f.write(oee_file.getbuffer())
-
-                # Detect OEE file format and load accordingly
-                file_type = detect_file_type(oee_path)
-
                 try:
+                    oee_path = os.path.join(tmp_dir, oee_file.name)
+                    with open(oee_path, "wb") as f:
+                        f.write(oee_file.getbuffer())
+
+                    # Detect OEE file format and load accordingly
+                    file_type = detect_file_type(oee_path)
                     if file_type == "oee_period_detail":
                         st.info("Detected: Traksys OEE Period Detail export")
                         hourly, shift_summary, overall, hour_avg = parse_oee_period_detail(oee_path)
@@ -209,6 +209,8 @@ with tab_analyze:
                 except Exception as e:
                     st.error(f"Analysis failed: {e}")
                     st.exception(e)
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
     else:
         st.info("Upload a Traksys OEE export (.xlsx) to get started.")
 
@@ -334,6 +336,8 @@ with tab_3rd_shift:
                     except Exception as e:
                         st.error(f"3rd Shift Analysis failed: {e}")
                         st.exception(e)
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
         else:
             st.info("Upload a Traksys OEE export (.xlsx) to generate the 3rd shift analysis.")
 
@@ -426,6 +430,8 @@ with tab_3rd_shift:
                     except Exception as e:
                         st.error(f"Target Tracker failed: {e}")
                         st.exception(e)
+                    finally:
+                        shutil.rmtree(tmp_dir, ignore_errors=True)
         else:
             st.info("Upload rochelle_product_data.json to generate the target tracker.")
 

@@ -376,7 +376,6 @@ def parse_event_summary(filepath):
                     "total_occurrences": cnt,
                     "total_hours": round(dur / 60, 1),
                 })
-            current_reason = name
 
     wb.close()
 
