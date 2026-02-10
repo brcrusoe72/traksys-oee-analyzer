@@ -1697,7 +1697,13 @@ def main():
         print(f"Error: OEE file not found: {oee_file}")
         sys.exit(1)
 
-    hourly, shift_summary, overall, hour_avg = load_oee_data(oee_file)
+    from parse_traksys import detect_file_type, parse_oee_period_detail
+    oee_type = detect_file_type(oee_file)
+    if oee_type == "oee_period_detail":
+        print("  Detected: Traksys OEE Period Detail export")
+        hourly, shift_summary, overall, hour_avg = parse_oee_period_detail(oee_file)
+    else:
+        hourly, shift_summary, overall, hour_avg = load_oee_data(oee_file)
 
     downtime = None
     if downtime_file:
