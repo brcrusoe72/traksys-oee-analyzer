@@ -9,3 +9,25 @@ venv/
 !sample_data/
 .DS_Store
 Thumbs.db
+
+# Runtime data
+history.jsonl
+*.jsonl
+
+# Windows junk
+nul
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# pytest
+.pytest_cache/
+
+# Temp files
+*.tmp
+*.bak
