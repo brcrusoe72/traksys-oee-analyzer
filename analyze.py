@@ -986,7 +986,8 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
     add_exec("Average Cases/Hour", f"{avg_cph:,.0f}")
     add_exec("90th Percentile CPH (Benchmark)", f"{target_cph:,.0f}")
     add_exec("", "")
-    add_exec("Average OEE", f"{avg_oee:.1f}%")
+    add_exec("Average OEE", f"{avg_oee:.1f}% (Target: 50%)")
+    add_exec("OEE Gap to Target", f"{50.0 - avg_oee:.1f} points to close")
     add_exec("Average Availability", f"{avg_avail:.1%}")
     add_exec("Average Performance", f"{avg_perf:.1%}")
     add_exec("Average Quality", f"{avg_qual:.1%}")
@@ -994,7 +995,7 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
 
     # Utilization — what % of scheduled time had production?
     util_pct, prod_hours, sched_hours, dead_count = _compute_utilization(hourly)
-    add_exec("Utilization (% Time Producing)", f"{util_pct:.1f}%")
+    add_exec("Utilization (% Time Producing)", f"{util_pct:.1f}% ({prod_hours:.1f} of {sched_hours:.1f} hrs)")
     add_exec("Running OEE (When Line Is Up)", f"{avg_oee:.1f}%")
     add_exec("Dead Hours (0 Cases)", f"{prod_hours:.1f} producing of {sched_hours:.1f} scheduled ({dead_count} dead intervals)")
     add_exec("", "")
@@ -1049,63 +1050,62 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
             results[tab_name] = dive_df
 
     # ===================================================================
-    # TAB 5: SHIFT COMPARISON (side by side)
+    # TAB 5: SHIFT COMPARISON (day by day)
     # ===================================================================
-    # Select core columns that exist, build a clean comparison table
-    comp_cols = ["shift", "oee_pct", "total_cases", "total_hours", "cases_per_hour"]
-    comp_cols = [c for c in comp_cols if c in overall.columns]
-    shift_comp = overall[comp_cols].copy()
-    for col in ["cases_per_hour", "total_cases", "total_hours"]:
+    comp_cols = ["date_str", "shift", "oee_pct", "total_cases", "total_hours", "cases_per_hour"]
+    comp_cols = [c for c in comp_cols if c in shift_summary.columns]
+    shift_comp = shift_summary[comp_cols].copy()
+    for col in ["cases_per_hour", "total_cases"]:
         if col in shift_comp.columns:
-            shift_comp[col] = shift_comp[col].round(0 if col != "total_hours" else 1)
+            shift_comp[col] = shift_comp[col].round(0)
+    if "total_hours" in shift_comp.columns:
+        shift_comp["total_hours"] = shift_comp["total_hours"].round(1)
     if "oee_pct" in shift_comp.columns:
         shift_comp["oee_pct"] = shift_comp["oee_pct"].round(1)
-    # Add good/bad cases if available
     for col in ["good_cases", "bad_cases"]:
-        if col in overall.columns:
-            shift_comp[col] = overall[col].round(0)
-    shift_comp = shift_comp.sort_values("oee_pct", ascending=False)
+        if col in shift_summary.columns:
+            shift_comp[col] = shift_summary[col].round(0)
+    shift_comp = shift_comp.sort_values(["date_str", "shift"])
     rename_map = {
-        "shift": "Shift", "oee_pct": "OEE %", "total_cases": "Total Cases",
-        "total_hours": "Total Hours", "cases_per_hour": "Cases/Hr",
-        "good_cases": "Good Cases", "bad_cases": "Bad Cases",
+        "date_str": "Date", "shift": "Shift", "oee_pct": "OEE %",
+        "total_cases": "Total Cases", "total_hours": "Total Hours",
+        "cases_per_hour": "Cases/Hr", "good_cases": "Good Cases",
+        "bad_cases": "Bad Cases",
     }
     shift_comp = shift_comp.rename(columns=rename_map)
     results["Shift Comparison"] = shift_comp
 
     # ===================================================================
-    # TAB 6: LOSS BREAKDOWN
+    # TAB 6: LOSS BREAKDOWN (day by day)
     # ===================================================================
     loss_rows = []
-    for shift_name_lb in hourly["shift"].unique():
-        shift_data = hourly[hourly["shift"] == shift_name_lb]
+    for (date_val, shift_name_lb), shift_data in hourly.groupby(["date_str", "shift"]):
         sa, sp, sq, soee = _aggregate_oee(shift_data)
-        s_util, s_prod_hrs, s_sched_hrs, s_dead = _compute_utilization(shift_data)
         loss_rows.append({
+            "date_str": date_val,
             "shift": shift_name_lb,
+            "avg_oee": round(soee, 1),
             "avg_availability": sa,
             "avg_performance": sp,
             "avg_quality": sq,
-            "avg_oee": round(soee, 1),
-            "utilization": round(s_util, 1),
-            "dead_hours": s_dead,
+            "total_cases": round(shift_data["total_cases"].sum(), 0),
             "total_cases_lost": round(shift_data["cases_gap"].sum(), 0),
         })
-    loss_by_shift = pd.DataFrame(loss_rows)
-    loss_by_shift["avail_loss_%"] = ((1 - loss_by_shift["avg_availability"]) * 100).round(1)
-    loss_by_shift["perf_loss_%"] = ((1 - loss_by_shift["avg_performance"]) * 100).round(1)
-    loss_by_shift["qual_loss_%"] = ((1 - loss_by_shift["avg_quality"]) * 100).round(1)
+    loss_by_day = pd.DataFrame(loss_rows)
+    loss_by_day["avail_loss_%"] = ((1 - loss_by_day["avg_availability"]) * 100).round(1)
+    loss_by_day["perf_loss_%"] = ((1 - loss_by_day["avg_performance"]) * 100).round(1)
+    loss_by_day["qual_loss_%"] = ((1 - loss_by_day["avg_quality"]) * 100).round(1)
 
-    # Add primary loss driver per shift
-    loss_by_shift["primary_loss"] = loss_by_shift.apply(
+    loss_by_day["primary_loss"] = loss_by_day.apply(
         lambda r: "Availability" if r["avail_loss_%"] >= r["perf_loss_%"] else "Performance", axis=1)
 
-    loss_out = loss_by_shift[["shift", "avg_oee", "utilization", "dead_hours",
-                               "avail_loss_%", "perf_loss_%", "qual_loss_%",
-                               "primary_loss", "total_cases_lost"]].copy()
-    loss_out.columns = ["Shift", "Avg OEE %", "Utilization %", "Dead Hours",
+    loss_out = loss_by_day[["date_str", "shift", "avg_oee",
+                             "avail_loss_%", "perf_loss_%", "qual_loss_%",
+                             "primary_loss", "total_cases", "total_cases_lost"]].copy()
+    loss_out = loss_out.sort_values(["date_str", "shift"])
+    loss_out.columns = ["Date", "Shift", "Avg OEE %",
                         "Avail Loss %", "Perf Loss %", "Qual Loss %",
-                        "Primary Loss Driver", "Cases Lost"]
+                        "Primary Loss Driver", "Cases Produced", "Cases Lost"]
     results["Loss Breakdown"] = loss_out
 
     # ===================================================================
@@ -1193,16 +1193,33 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
     # TAB: SHIFT DOWNTIME PARETO (when individual events available)
     # ===================================================================
     if has_events:
-        shift_reasons_df = downtime.get("shift_reasons_df")
-        if shift_reasons_df is not None and len(shift_reasons_df) > 0:
-            srd = shift_reasons_df.copy()
-            # Compute % of shift total
-            shift_totals = srd.groupby("shift")["total_minutes"].transform("sum")
-            srd["pct_of_shift"] = (srd["total_minutes"] / shift_totals.replace(0, np.nan) * 100).fillna(0).round(1)
-            srd = srd.sort_values(["shift", "total_minutes"], ascending=[True, False])
+        events_df = downtime.get("events_df")
+        if events_df is not None and len(events_df) > 0:
+            edf = events_df.copy()
+            # Derive date from start_time
+            edf["date_str"] = edf["start_time"].dt.strftime("%Y-%m-%d")
+            edf["shift"] = edf["shift"].fillna("Unassigned Shift")
+            # Group by date, shift, reason
+            srd = edf.groupby(["date_str", "shift", "reason"]).agg(
+                count=("duration_minutes", "size"),
+                total_minutes=("duration_minutes", "sum"),
+                avg_minutes=("duration_minutes", "mean"),
+                min_minutes=("duration_minutes", "min"),
+                max_minutes=("duration_minutes", "max"),
+            ).reset_index()
+            srd["avg_minutes"] = srd["avg_minutes"].round(1)
+            srd["min_minutes"] = srd["min_minutes"].round(1)
+            srd["max_minutes"] = srd["max_minutes"].round(1)
+            srd["total_minutes"] = srd["total_minutes"].round(1)
+            # % of day-shift total
+            day_shift_totals = srd.groupby(["date_str", "shift"])["total_minutes"].transform("sum")
+            srd["pct_of_shift"] = (srd["total_minutes"] / day_shift_totals.replace(0, np.nan) * 100).fillna(0).round(1)
+            srd = srd.sort_values(["date_str", "shift", "total_minutes"], ascending=[True, True, False])
 
-            sd_out = srd[["shift", "reason", "count", "total_minutes", "pct_of_shift"]].copy()
-            sd_out.columns = ["Shift", "Cause", "Events", "Minutes", "% of Shift Total"]
+            sd_out = srd[["date_str", "shift", "reason", "count", "total_minutes",
+                          "avg_minutes", "min_minutes", "max_minutes", "pct_of_shift"]].copy()
+            sd_out.columns = ["Date", "Shift", "Cause", "Events", "Total Min",
+                              "Avg Min", "Shortest", "Longest", "% of Shift"]
             results["Shift Downtime"] = sd_out
 
     # ===================================================================
@@ -1236,11 +1253,11 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
             results["Fault Detail"] = fault_detail
 
     # ===================================================================
-    # TAB 9: WORST HOURS (all shifts)
+    # TAB 9: WORST HOURS (all shifts) — with narrative context
     # ===================================================================
     worst = (
         hourly[hourly["total_hours"] >= 0.5].nsmallest(25, "oee_pct")
-        [["date_str", "day_of_week", "shift", "time_block", "cases_per_hour",
+        [["date_str", "day_of_week", "shift", "shift_hour", "time_block", "cases_per_hour",
           "oee_pct", "availability", "performance", "quality", "total_cases", "cases_gap"]]
         .copy()
     )
@@ -1250,31 +1267,113 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
     worst["performance"] = (worst["performance"] * 100).round(1)
     worst["quality"] = (worst["quality"] * 100).round(1)
     worst["cases_gap"] = worst["cases_gap"].round(0)
+
+    # Build narrative: what loss type + what caused it from event data
+    narratives = []
+    for _, wrow in worst.iterrows():
+        parts = []
+        # Identify the loss type
+        avail_loss = (1 - wrow["availability"] / 100) * 100
+        perf_loss = (1 - wrow["performance"] / 100) * 100
+        if wrow["total_cases"] == 0:
+            parts.append("Line was DOWN — 0 cases produced")
+        elif avail_loss > perf_loss and avail_loss > 20:
+            parts.append(f"Availability problem ({avail_loss:.0f}% loss) — line stopped frequently")
+        elif perf_loss > 20:
+            parts.append(f"Speed problem ({perf_loss:.0f}% loss) — line running but slow")
+        else:
+            parts.append(f"Mixed losses — avail {avail_loss:.0f}%, perf {perf_loss:.0f}%")
+
+        # Look up event causes for this hour if available
+        if has_events:
+            from parse_traksys import SHIFT_STARTS
+            events_df_w = downtime.get("events_df")
+            if events_df_w is not None and len(events_df_w) > 0:
+                shift_name_w = wrow["shift"]
+                shift_start = None
+                for sn, sh in SHIFT_STARTS.items():
+                    if sn in shift_name_w or shift_name_w in sn:
+                        shift_start = sh
+                        break
+                if shift_start is not None:
+                    clock_hour = (shift_start + int(wrow["shift_hour"]) - 1) % 24
+                    cal_date = wrow["date_str"]
+                    # 3rd shift midnight crossing
+                    if "3rd" in shift_name_w and clock_hour < 7:
+                        cal_date = (datetime.strptime(cal_date, "%Y-%m-%d").date()
+                                    + timedelta(days=1)).strftime("%Y-%m-%d")
+                    # Find events overlapping this clock hour
+                    hr_start = datetime.strptime(f"{cal_date} {clock_hour:02d}:00:00", "%Y-%m-%d %H:%M:%S")
+                    hr_end = hr_start + timedelta(hours=1)
+                    overlaps = events_df_w[
+                        (events_df_w["start_time"] < hr_end) & (events_df_w["end_time"] > hr_start)
+                    ].copy()
+                    if len(overlaps) > 0:
+                        # Compute overlap minutes per event
+                        overlaps["overlap"] = overlaps.apply(
+                            lambda e: (min(e["end_time"], hr_end) - max(e["start_time"], hr_start)).total_seconds() / 60, axis=1)
+                        top_causes = overlaps.groupby("reason")["overlap"].sum().sort_values(ascending=False)
+                        cause_strs = [f"{r}: {m:.0f}min" for r, m in top_causes.head(3).items()]
+                        parts.append("Machine data: " + "; ".join(cause_strs))
+
+        # Look up product
+        if "product_code" in hourly.columns:
+            prod = wrow.get("product_code", "") if "product_code" in worst.columns else ""
+            if not prod:
+                # Look up from hourly
+                match = hourly[(hourly["date_str"] == wrow["date_str"]) &
+                               (hourly["shift"] == wrow["shift"]) &
+                               (hourly["shift_hour"] == wrow["shift_hour"])]
+                if len(match) > 0 and "product_code" in match.columns:
+                    prod = match.iloc[0].get("product_code", "")
+            if prod:
+                parts.append(f"Product: {prod}")
+
+        narratives.append(" | ".join(parts))
+
+    worst["what_happened"] = narratives
+    worst = worst.drop(columns=["shift_hour"])
     worst.columns = ["Date", "Day", "Shift", "Hour", "Cases/Hr", "OEE %",
-                     "Avail %", "Perf %", "Qual %", "Cases", "Cases Lost"]
+                     "Avail %", "Perf %", "Qual %", "Cases", "Cases Lost", "What Happened"]
     results["Worst Hours"] = worst
 
     # ===================================================================
     # TAB 10: DAILY TREND
     # ===================================================================
+    # Compute from hourly data directly (more accurate than shift_summary aggregation)
     shift_summary["_w_oee"] = shift_summary["oee_pct"] * shift_summary["total_hours"]
     daily = (
-        shift_summary.groupby("date_str")
-        .agg(total_cases=("total_cases", "sum"), total_hours=("total_hours", "sum"),
-             _w_oee=("_w_oee", "sum"), n_shifts=("shift", "count"))
+        hourly.groupby("date_str")
+        .agg(total_cases=("total_cases", "sum"),
+             total_hours=("total_hours", "sum"),
+             good_cases=("good_cases", "sum") if "good_cases" in hourly.columns else ("total_cases", "sum"))
         .reset_index()
     )
-    daily["avg_oee"] = (daily["_w_oee"] / daily["total_hours"].replace(0, np.nan)).fillna(0).round(1)
-    daily.drop(columns=["_w_oee"], inplace=True)
+    # Weighted OEE from shift_summary (avoids double-counting sub-hour intervals)
+    daily_oee = (
+        shift_summary.groupby("date_str")
+        .agg(_w_oee=("_w_oee", "sum"), _hrs=("total_hours", "sum"), n_shifts=("shift", "count"))
+        .reset_index()
+    )
+    daily_oee["avg_oee"] = (daily_oee["_w_oee"] / daily_oee["_hrs"].replace(0, np.nan)).fillna(0).round(1)
     shift_summary.drop(columns=["_w_oee"], inplace=True, errors="ignore")
-    daily["cases_per_hour"] = (daily["total_cases"] / daily["total_hours"]).round(0)
+    daily = daily.merge(daily_oee[["date_str", "n_shifts", "avg_oee"]], on="date_str", how="left")
+
+    daily["total_hours"] = daily["total_hours"].round(1)
+    daily["cases_per_hour"] = (daily["total_cases"] / daily["total_hours"].replace(0, np.nan)).fillna(0).round(0)
     daily["total_cases"] = daily["total_cases"].round(0)
+    # Target cases = CPH benchmark * hours
+    daily["target_cases"] = (target_cph * daily["total_hours"]).round(0)
+    daily["cases_vs_target"] = (daily["total_cases"] - daily["target_cases"]).round(0)
     daily = daily.sort_values("date_str")
     daily["oee_7day_avg"] = daily["avg_oee"].rolling(7, min_periods=1).mean().round(1)
     daily["cph_7day_avg"] = daily["cases_per_hour"].rolling(7, min_periods=1).mean().round(0)
-    daily_out = daily[["date_str", "n_shifts", "total_cases", "cases_per_hour",
+    daily_out = daily[["date_str", "n_shifts", "total_hours", "cases_per_hour", "total_cases",
+                       "target_cases", "cases_vs_target",
                        "cph_7day_avg", "avg_oee", "oee_7day_avg"]].copy()
-    daily_out.columns = ["Date", "Shifts", "Total Cases", "Cases/Hr", "CPH 7-Day Avg", "OEE %", "OEE 7-Day Avg"]
+    daily_out.columns = ["Date", "Shifts", "Sched Hours", "Cases/Hr", "Actual Cases",
+                         "Target Cases (Benchmark)", "Cases vs Target",
+                         "CPH 7-Day Avg", "OEE %", "OEE 7-Day Avg"]
     results["Daily Trend"] = daily_out
 
     # ===================================================================
@@ -1288,77 +1387,95 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
     results["Shift x Day OEE"] = pivot
 
     # ===================================================================
-    # TAB 12: WHAT TO FOCUS ON (conclusion with step-by-step actions)
+    # TAB 12: WHAT TO FOCUS ON (with evidence — show the work)
     # ===================================================================
+    OEE_TARGET = 50.0  # Plant target OEE %
+    oee_gap_to_target = OEE_TARGET - avg_oee
+    target_cases_per_day = target_cph * (total_hours / n_days)
+    cases_at_target_oee = total_cases / (avg_oee / 100) * (OEE_TARGET / 100) if avg_oee > 0 else 0
+    cases_gained_at_target = cases_at_target_oee - total_cases
+
     recs = []
     priority = 1
+
+    # --- OEE vs Target: the framing ---
+    recs.append({
+        "Priority": priority,
+        "Finding": f"OEE is {avg_oee:.1f}% vs {OEE_TARGET:.0f}% target — {oee_gap_to_target:.1f} points to close",
+        "The Work": (
+            f"Current: {avg_oee:.1f}% OEE = {avg_avail:.0%} Availability x {avg_perf:.0%} Performance x {avg_qual:.0%} Quality. "
+            f"Target 50% requires closing {oee_gap_to_target:.1f} pts. "
+            f"Availability gap: {(1-avg_avail)*100:.0f}% loss (line stopped {(1-avg_avail)*total_hours:.0f} of {total_hours:.0f} hrs). "
+            f"Performance gap: {(1-avg_perf)*100:.0f}% loss (running at {avg_perf:.0%} of rated speed when up). "
+            f"At 50% OEE the line produces ~{cases_gained_at_target/n_days:,.0f} more cases/day = ~{cases_gained_at_target:,.0f} over {n_days} days."
+        ),
+        "Step 1": f"Availability is the biggest lever — {(1-avg_avail)*100:.0f}% of scheduled time the line isn't running.",
+        "Step 2": f"Performance costs another {(1-avg_perf)*100:.0f}% — even when running, speed is below rated.",
+        "Step 3": "Fix the top 2 downtime causes below and you close most of the availability gap.",
+        "Step 4": f"Re-run this analysis monthly. Track OEE trend toward {OEE_TARGET:.0f}%.",
+        "Step 5": f"Every 1 OEE point gained = ~{total_cases/avg_oee*1/n_days:,.0f} additional cases/day.",
+    })
+    priority += 1
 
     if has_downtime:
         reasons_df = downtime["reasons_df"]
         actionable_reasons = reasons_df[~reasons_df["reason"].isin(EXCLUDE_REASONS)]
         top_reason = actionable_reasons.sort_values("total_minutes", ascending=False).iloc[0] if len(actionable_reasons) > 0 else None
+        total_downtime_min = actionable_reasons["total_minutes"].sum()
 
         if top_reason is not None:
+            pct_of_total = top_reason["total_minutes"] / total_downtime_min * 100 if total_downtime_min > 0 else 0
+            # Per-shift breakdown if events available
+            shift_detail = ""
+            if has_events:
+                events_df_focus = downtime.get("events_df")
+                if events_df_focus is not None and len(events_df_focus) > 0:
+                    reason_events = events_df_focus[events_df_focus["reason"] == top_reason["reason"]]
+                    if len(reason_events) > 0:
+                        by_shift = reason_events.groupby("shift")["duration_minutes"].agg(["sum", "count"])
+                        parts = [f"{s}: {r['sum']:.0f}min/{int(r['count'])} events" for s, r in by_shift.iterrows()]
+                        shift_detail = " By shift: " + ", ".join(parts) + "."
+
             recs.append({
                 "Priority": priority,
-                "Finding": f"#1 loss: {top_reason['reason']} — {top_reason['total_hours']:.0f} hours / {int(top_reason['total_occurrences'])} events",
-                "Step 1": f"Pull the last 2 weeks of {top_reason['reason']} events from Traksys. Sort by duration — find the top 10 longest stops.",
-                "Step 2": f"Walk the line during the next {top_reason['reason']} event. Document what operators see: what failed, what they did, how long each step took.",
-                "Step 3": f"Run a 5-Why or fishbone with maintenance on the top 3 failure modes. Identify root causes vs symptoms.",
-                "Step 4": f"Build countermeasures (PM task, spare parts staging, SOP change, sensor adjustment) and assign owners with dates.",
-                "Step 5": f"Track {top_reason['reason']} hours weekly. Target 50% reduction = ~{top_reason['total_hours']/2:.0f} hours recovered.",
+                "Finding": f"#1 loss: {top_reason['reason']} — {top_reason['total_hours']:.0f} hrs / {int(top_reason['total_occurrences'])} events ({pct_of_total:.0f}% of all downtime)",
+                "The Work": (
+                    f"{top_reason['reason']} consumed {top_reason['total_minutes']:.0f} minutes across {int(top_reason['total_occurrences'])} events. "
+                    f"Avg event: {top_reason['total_minutes']/top_reason['total_occurrences']:.1f} min. "
+                    f"This is {pct_of_total:.0f}% of all actionable downtime ({total_downtime_min:.0f} min total). "
+                    f"Eliminating 50% recovers ~{top_reason['total_hours']/2:.0f} hrs = ~{top_reason['total_hours']/2 * avg_cph:,.0f} cases.{shift_detail}"
+                ),
+                "Step 1": f"Pull 2 weeks of {top_reason['reason']} events. Sort by duration — find the top 10 longest stops.",
+                "Step 2": f"Walk the line during the next {top_reason['reason']} event. Time every step: detect, respond, diagnose, fix, restart.",
+                "Step 3": f"5-Why on top 3 failure modes with maintenance. Root causes, not symptoms.",
+                "Step 4": f"Build countermeasures (PM task, spare parts, SOP, sensor adjustment). Owners + dates.",
+                "Step 5": f"Track weekly. Target 50% reduction = ~{top_reason['total_hours']/2:.0f} hours recovered.",
             })
             priority += 1
 
-        # Unassigned check
-        unassigned = reasons_df[reasons_df["reason"].isin(["Unassigned", "Unknown"])]
-        if len(unassigned) > 0:
-            total_unassigned_hrs = unassigned["total_hours"].sum()
-            total_unassigned_events = int(unassigned["total_occurrences"].sum())
-            if total_unassigned_hrs > 5:
-                recs.append({
-                    "Priority": priority,
-                    "Finding": f"{total_unassigned_hrs:.0f} hours uncoded ({total_unassigned_events} events marked Unassigned/Unknown)",
-                    "Step 1": "Review the Traksys reason code tree. Are codes confusing, too many, or missing common causes?",
-                    "Step 2": "Simplify: aim for 15-20 actionable codes, not 100. Merge duplicates, remove obsolete ones.",
-                    "Step 3": "Coach supervisors at shift start: 'If you can't code it, write a note. No blanks.'",
-                    "Step 4": "Set up a weekly check — pull unassigned events, review with shift leads, assign codes retroactively.",
-                    "Step 5": f"Target: get Unassigned below 5% of total events (currently {total_unassigned_events} events).",
-                })
-                priority += 1
-
-        # Short stops
-        short_stops = reasons_df[reasons_df["reason"] == "Short Stop"]
-        if len(short_stops) > 0:
-            ss = short_stops.iloc[0]
-            if ss["total_hours"] > 10:
-                avg_sec = ss["total_minutes"] * 60 / ss["total_occurrences"] if ss["total_occurrences"] > 0 else 0
-                recs.append({
-                    "Priority": priority,
-                    "Finding": f"{int(ss['total_occurrences'])} short stops totaling {ss['total_hours']:.0f} hours — avg {avg_sec:.0f} sec each",
-                    "Step 1": "Get short stop data by location/sensor if Traksys tracks it. Find the top 3 trigger points.",
-                    "Step 2": "Observe the line during peak short-stop periods. Watch for: jams at transfers, sensor trips, product orientation.",
-                    "Step 3": "Check sensor sensitivity, conveyor speeds at transitions, guide rail gaps. Small adjustments cut stops 30%+.",
-                    "Step 4": "For each top location: document the fix, test for one shift, verify reduction in data.",
-                    "Step 5": f"Track weekly. Goal: reduce from {int(ss['total_occurrences'])} to under {int(ss['total_occurrences'] * 0.7)} events.",
-                })
-                priority += 1
-
-        # Next equipment causes
+        # Next equipment causes — with data
         equip_reasons = actionable_reasons[
             ~actionable_reasons["reason"].isin(["Unassigned", "Unknown", "Short Stop", "Day Code Change"])
         ].sort_values("total_minutes", ascending=False)
 
         if len(equip_reasons) >= 2:
+            work_parts = []
             items = []
-            for idx in range(1, min(3, len(equip_reasons))):
+            for idx in range(1, min(4, len(equip_reasons))):
                 r = equip_reasons.iloc[idx]
+                pct = r["total_minutes"] / total_downtime_min * 100 if total_downtime_min > 0 else 0
+                avg_dur = r["total_minutes"] / r["total_occurrences"] if r["total_occurrences"] > 0 else 0
                 items.append(f"{r['reason']} ({r['total_hours']:.0f} hrs / {int(r['total_occurrences'])} events)")
+                work_parts.append(
+                    f"{r['reason']}: {r['total_minutes']:.0f} min, {int(r['total_occurrences'])} events, "
+                    f"avg {avg_dur:.1f} min/event, {pct:.0f}% of total downtime"
+                )
             if items:
                 recs.append({
                     "Priority": priority,
-                    "Finding": f"Next equipment losses: {', '.join(items)}",
-                    "Step 1": "Don't start these until #1 is underway. Queue them as next reliability projects.",
+                    "Finding": f"Next losses: {', '.join(items)}",
+                    "The Work": " | ".join(work_parts),
+                    "Step 1": "Don't start these until #1 is underway. Queue as next reliability projects.",
                     "Step 2": "Pull event logs for each. Do they spike on certain shifts, products, or days?",
                     "Step 3": "Check PM schedules — are these assets getting regular preventive maintenance?",
                     "Step 4": "Talk to operators and mechanics: what do they see? What parts keep failing?",
@@ -1366,73 +1483,153 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
                 })
                 priority += 1
 
-    # Shift gap
+        # Unassigned check
+        unassigned = reasons_df[reasons_df["reason"].isin(["Unassigned", "Unknown"])]
+        if len(unassigned) > 0:
+            total_unassigned_hrs = unassigned["total_hours"].sum()
+            total_unassigned_events = int(unassigned["total_occurrences"].sum())
+            total_all_events = int(reasons_df["total_occurrences"].sum())
+            unassigned_pct = total_unassigned_events / total_all_events * 100 if total_all_events > 0 else 0
+            if total_unassigned_hrs > 1:
+                recs.append({
+                    "Priority": priority,
+                    "Finding": f"{total_unassigned_hrs:.0f} hrs uncoded ({total_unassigned_events} events = {unassigned_pct:.0f}% of all events)",
+                    "The Work": (
+                        f"{total_unassigned_events} events totaling {total_unassigned_hrs:.0f} hours have no reason code. "
+                        f"That's {unassigned_pct:.0f}% of {total_all_events} total events. "
+                        f"These {total_unassigned_hrs:.0f} hours could be hiding the real #1 cause."
+                    ),
+                    "Step 1": "Review Traksys reason code tree. Are codes confusing, too many, or missing common causes?",
+                    "Step 2": "Simplify: 15-20 actionable codes, not 100. Merge duplicates, drop obsolete.",
+                    "Step 3": "Coach supervisors: 'If you can't code it, write a note. No blanks.'",
+                    "Step 4": "Weekly audit — pull unassigned events, review with shift leads, code retroactively.",
+                    "Step 5": f"Target: Unassigned below 5% (currently {unassigned_pct:.0f}%).",
+                })
+                priority += 1
+
+        # Short stops
+        short_stops = reasons_df[reasons_df["reason"] == "Short Stop"]
+        if len(short_stops) > 0:
+            ss = short_stops.iloc[0]
+            if ss["total_hours"] > 2:
+                avg_sec = ss["total_minutes"] * 60 / ss["total_occurrences"] if ss["total_occurrences"] > 0 else 0
+                pct = ss["total_minutes"] / total_downtime_min * 100 if total_downtime_min > 0 else 0
+                recs.append({
+                    "Priority": priority,
+                    "Finding": f"{int(ss['total_occurrences'])} short stops = {ss['total_hours']:.0f} hrs ({pct:.0f}% of downtime)",
+                    "The Work": (
+                        f"{int(ss['total_occurrences'])} events x {avg_sec:.0f} sec avg = {ss['total_minutes']:.0f} min total. "
+                        f"That's {pct:.0f}% of all downtime. Short stops are a Performance loss — "
+                        f"they don't show as 'line down' but they kill throughput."
+                    ),
+                    "Step 1": "Get short stop data by location/sensor. Find the top 3 trigger points.",
+                    "Step 2": "Observe during peak periods: jams at transfers, sensor trips, product orientation.",
+                    "Step 3": "Check sensor sensitivity, conveyor speeds, guide rail gaps. Small adjustments cut stops 30%+.",
+                    "Step 4": "For each top location: document fix, test one shift, verify reduction.",
+                    "Step 5": f"Target: reduce from {int(ss['total_occurrences'])} to {int(ss['total_occurrences'] * 0.7)} events.",
+                })
+                priority += 1
+
+    # Shift gap — with data
     gap = top_shift["oee_pct"] - bot_shift["oee_pct"]
     if gap > 3:
         cph_gap = top_shift["cases_per_hour"] - bot_shift["cases_per_hour"]
+        top_cases = top_shift["total_cases"]
+        bot_cases = bot_shift["total_cases"]
+        top_hrs = top_shift["total_hours"]
+        bot_hrs = bot_shift["total_hours"]
         recs.append({
             "Priority": priority,
-            "Finding": f"{bot_shift['shift']} underperforms {top_shift['shift']} by {gap:.1f} OEE points ({cph_gap:,.0f} fewer cases/hr)",
-            "Step 1": f"See the shift deep dive tabs — compare hour-by-hour patterns between shifts.",
+            "Finding": f"{bot_shift['shift']} underperforms {top_shift['shift']} by {gap:.1f} OEE points",
+            "The Work": (
+                f"{top_shift['shift']}: {top_shift['oee_pct']:.1f}% OEE, {top_shift['cases_per_hour']:,.0f} CPH, {top_cases:,.0f} cases in {top_hrs:.0f} hrs. "
+                f"{bot_shift['shift']}: {bot_shift['oee_pct']:.1f}% OEE, {bot_shift['cases_per_hour']:,.0f} CPH, {bot_cases:,.0f} cases in {bot_hrs:.0f} hrs. "
+                f"Gap: {cph_gap:,.0f} cases/hr. If worst shift matched best, that's ~{cph_gap * bot_hrs:,.0f} more cases."
+            ),
+            "Step 1": "See shift deep dive tabs — compare hour-by-hour patterns.",
             "Step 2": f"Shadow {top_shift['shift']} for a full shift. Document what they do differently.",
-            "Step 3": f"Interview leads on both shifts. Ask: what slows you down? What's not ready when you start?",
-            "Step 4": "Build a standard startup/changeover checklist from best practices. Pilot on worst shift.",
-            "Step 5": f"Track weekly by shift. Goal: close the gap by {gap/2:.0f} OEE points within 4 weeks.",
+            "Step 3": "Interview leads on both shifts. What slows you down? What's not ready at start?",
+            "Step 4": "Build startup/changeover checklist from best practices. Pilot on worst shift.",
+            "Step 5": f"Goal: close gap by {gap/2:.0f} OEE points within 4 weeks.",
         })
         priority += 1
 
-    # Availability vs Performance
+    # Availability vs Performance — with data
     if avail_loss > perf_loss * 1.3:
+        avail_hrs_lost = (1 - avg_avail) * total_hours
         recs.append({
             "Priority": priority,
-            "Finding": f"Availability ({avg_avail:.0%}) is the primary OEE drag — line not running {avail_loss:.0f}% of the time",
-            "Step 1": "See 'Fault Summary' tab — Equipment/Mechanical is likely the biggest bucket.",
-            "Step 2": "Time the top 3 changeover types with a stopwatch. Document every step and wait.",
-            "Step 3": "Apply SMED: separate internal vs external tasks. Stage materials before the line stops.",
-            "Step 4": "For breakdowns: review PM compliance and spare parts availability with maintenance.",
-            "Step 5": "Target: improve availability from {:.0f}% to {:.0f}% in 6 weeks.".format(avg_avail * 100, avg_avail * 100 + 5),
+            "Finding": f"Availability ({avg_avail:.0%}) is the primary drag — line stopped {avail_hrs_lost:.0f} of {total_hours:.0f} hrs",
+            "The Work": (
+                f"Availability {avg_avail:.0%} means {avail_hrs_lost:.0f} hours of scheduled time the line wasn't running. "
+                f"Performance {avg_perf:.0%} is secondary. "
+                f"Fix availability first — every hour recovered at current CPH = {avg_cph:,.0f} cases."
+            ),
+            "Step 1": "See 'Fault Summary' — Equipment/Mechanical is likely the biggest bucket.",
+            "Step 2": "Time top 3 changeover types. Document every step and wait.",
+            "Step 3": "SMED: separate internal vs external tasks. Stage materials before line stops.",
+            "Step 4": "For breakdowns: review PM compliance and spare parts with maintenance.",
+            "Step 5": f"Target: availability from {avg_avail*100:.0f}% to {avg_avail*100+5:.0f}% in 6 weeks.",
         })
         priority += 1
     elif perf_loss > avail_loss * 1.3:
         recs.append({
             "Priority": priority,
-            "Finding": f"Performance ({avg_perf:.0%}) is the primary OEE drag — line running slow when up",
-            "Step 1": "See 'Fault Summary' tab — Micro Stops are likely a big contributor.",
-            "Step 2": "Check rated speed vs actual on HMI. Are operators running below target? Why?",
-            "Step 3": "Look for minor stops not captured as downtime — jams operators clear without logging.",
+            "Finding": f"Performance ({avg_perf:.0%}) is the primary drag — line slow when running",
+            "The Work": (
+                f"When the line IS running, it only achieves {avg_perf:.0%} of rated speed. "
+                f"Availability {avg_avail:.0%} is secondary. "
+                f"At current availability, improving performance 5 pts = ~{total_hours * avg_avail * 0.05 * target_cph:,.0f} more cases."
+            ),
+            "Step 1": "See 'Fault Summary' — Micro Stops are likely a big contributor.",
+            "Step 2": "Check rated speed vs actual on HMI. Are operators running below target?",
+            "Step 3": "Look for minor stops not captured — jams operators clear without logging.",
             "Step 4": "Review centerline settings: documented, posted, followed shift to shift?",
-            "Step 5": "Target: improve performance from {:.0f}% to {:.0f}% in 6 weeks.".format(avg_perf * 100, avg_perf * 100 + 5),
+            "Step 5": f"Target: performance from {avg_perf*100:.0f}% to {avg_perf*100+5:.0f}% in 6 weeks.",
         })
         priority += 1
     else:
+        avail_hrs_lost = (1 - avg_avail) * total_hours
         recs.append({
             "Priority": priority,
             "Finding": f"Both Availability ({avg_avail:.0%}) and Performance ({avg_perf:.0%}) are significant losses",
-            "Step 1": "See 'Fault Summary' tab — Equipment losses hit availability, Micro Stops hit performance.",
-            "Step 2": "Attack availability first — usually faster to fix (changeovers, material staging, startup).",
-            "Step 3": "Simultaneously investigate performance: rated speed vs actual, minor stops, cycle time.",
-            "Step 4": "Pick the single biggest contributor from each. Run a focused improvement on each.",
-            "Step 5": "Target: +5 OEE points in 6 weeks from combined gains.",
+            "The Work": (
+                f"Availability: {avail_hrs_lost:.0f} hrs lost (line stopped). "
+                f"Performance: running at {avg_perf:.0%} of rated speed when up. "
+                f"Combined, these two factors explain why OEE is {avg_oee:.1f}% vs {OEE_TARGET:.0f}% target."
+            ),
+            "Step 1": "Attack availability first — usually faster to fix (changeovers, staging, startup).",
+            "Step 2": "Simultaneously investigate performance: rated speed vs actual, minor stops.",
+            "Step 3": "Pick the single biggest contributor from each. Run focused improvement.",
+            "Step 4": "See Fault Summary for category breakdown.",
+            "Step 5": f"Target: +5 OEE points in 6 weeks from combined gains.",
         })
         priority += 1
 
-    # Catastrophic hours
-    worst_hours = hourly[hourly["oee_pct"] < 15]
-    if len(worst_hours) > 0:
-        n_catastrophic = len(worst_hours)
+    # Catastrophic hours — with specifics
+    worst_hours_df = hourly[hourly["oee_pct"] < 15]
+    if len(worst_hours_df) > 0:
+        n_catastrophic = len(worst_hours_df)
+        cases_lost_catastrophic = worst_hours_df["cases_gap"].sum()
+        # Which shifts have the most?
+        cat_by_shift = worst_hours_df.groupby("shift").size().sort_values(ascending=False)
+        shift_breakdown = ", ".join([f"{s}: {c}" for s, c in cat_by_shift.items()])
         recs.append({
             "Priority": priority,
-            "Finding": f"{n_catastrophic} hours had OEE below 15% — see 'Worst Hours' tab and shift deep dives",
-            "Step 1": "Cross-reference each with Traksys downtime events. What happened?",
+            "Finding": f"{n_catastrophic} hours below 15% OEE — {cases_lost_catastrophic:,.0f} cases lost in those hours alone",
+            "The Work": (
+                f"{n_catastrophic} hours with OEE below 15%. Cases lost in those hours: {cases_lost_catastrophic:,.0f}. "
+                f"By shift: {shift_breakdown}. See 'Worst Hours' tab for each hour with cause."
+            ),
+            "Step 1": "Worst Hours tab now shows What Happened — machine data cause for each.",
             "Step 2": "Look for patterns: same shift? Same day? Same time block?",
             "Step 3": "For the most common cause, build a specific countermeasure.",
-            "Step 4": "Assign an owner and a completion date for each countermeasure.",
-            "Step 5": f"Target: cut catastrophic hours from {n_catastrophic} to under {max(n_catastrophic // 2, 5)}.",
+            "Step 4": "Assign an owner and completion date.",
+            "Step 5": f"Target: cut catastrophic hours from {n_catastrophic} to {max(n_catastrophic // 2, 2)}.",
         })
         priority += 1
 
-    # Startup — compare each shift's first hour to the rest
-    # Uses minimum hour per shift (clock hours) rather than hardcoded shift_hour == 1
+    # Startup loss
     if "shift_hour" in hour_avg.columns:
         shift_first_hours = hour_avg.groupby("shift")["shift_hour"].min()
         first_mask = hour_avg.apply(
@@ -1449,27 +1646,41 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
         other_avg_oee = (_weighted_mean(other_hours["oee_pct"], other_hours["total_hours"])
                          if "total_hours" in other_hours.columns else other_hours["oee_pct"].mean())
         if first_avg_oee < other_avg_oee - 3:
-            oee_gap = other_avg_oee - first_avg_oee
+            oee_gap_startup = other_avg_oee - first_avg_oee
+            n_shifts_in_data = len(hourly["shift"].unique())
+            cases_lost_startup = oee_gap_startup / 100 * target_cph * n_shifts_in_data * n_days
             recs.append({
                 "Priority": priority,
-                "Finding": f"First hour averages {first_avg_oee:.1f}% OEE vs {other_avg_oee:.1f}% — {oee_gap:.0f} point startup loss",
-                "Step 1": "See each shift deep dive — first hour performance is broken out.",
-                "Step 2": "Observe shift start: time from bell to first good case off the line.",
-                "Step 3": "Build a startup checklist: materials staged, settings verified, passdown in <10 min.",
-                "Step 4": "Consider 15-min shift overlap so outgoing crew keeps line running during handoff.",
-                "Step 5": f"Goal: close startup gap from {oee_gap:.0f} points to under 3 points.",
+                "Finding": f"Startup loss: 1st hour {first_avg_oee:.1f}% vs {other_avg_oee:.1f}% OEE ({oee_gap_startup:.0f} pt gap)",
+                "The Work": (
+                    f"First hour of each shift averages {first_avg_oee:.1f}% OEE. Remaining hours: {other_avg_oee:.1f}%. "
+                    f"That's a {oee_gap_startup:.0f} point gap across {n_shifts_in_data} shifts/day = "
+                    f"~{cases_lost_startup:,.0f} cases lost to slow startups over {n_days} days."
+                ),
+                "Step 1": "See shift deep dives — first hour is broken out.",
+                "Step 2": "Observe shift start: time from bell to first good case.",
+                "Step 3": "Startup checklist: materials staged, settings verified, passdown <10 min.",
+                "Step 4": "Consider 15-min shift overlap for running handoff.",
+                "Step 5": f"Goal: close startup gap from {oee_gap_startup:.0f} to under 3 points.",
             })
             priority += 1
 
-    # Total gap
+    # Total gap — bottom line
     recs.append({
         "Priority": priority,
-        "Finding": f"Total gap vs benchmark: ~{total_cases_lost:,.0f} cases over {n_days} days ({total_cases_lost/n_days:,.0f}/day)",
-        "Step 1": "This gap = current output vs what the line produces on good hours (top 10%).",
-        "Step 2": "The line CAN produce at benchmark rate — it just doesn't consistently.",
-        "Step 3": "Pick the top 2-3 actions above and execute. Don't try to fix everything at once.",
-        "Step 4": "Re-run this analysis in 4-6 weeks with fresh data to measure progress.",
-        "Step 5": "A 10% OEE improvement recovers ~{:,.0f} cases/day.".format(total_cases_lost / n_days * 0.1),
+        "Finding": f"Bottom line: {total_cases_lost:,.0f} cases lost over {n_days} days ({total_cases_lost/n_days:,.0f}/day)",
+        "The Work": (
+            f"Actual: {total_cases:,.0f} cases at {avg_cph:,.0f} CPH. "
+            f"Benchmark (top 10% hours): {target_cph:,.0f} CPH. "
+            f"Gap: {total_cases_lost:,.0f} cases over {n_days} days. "
+            f"At {OEE_TARGET:.0f}% OEE target: ~{cases_gained_at_target:,.0f} additional cases over this period. "
+            f"Every 1 OEE point = ~{total_cases/avg_oee*1/n_days:,.0f} cases/day."
+        ),
+        "Step 1": "The line CAN produce at benchmark — it just doesn't consistently.",
+        "Step 2": "Top 2-3 actions above address the biggest gaps. Don't try to fix everything.",
+        "Step 3": "Re-run this analysis in 4-6 weeks with fresh data to measure progress.",
+        "Step 4": f"Track OEE weekly. Current: {avg_oee:.1f}%. Target: {OEE_TARGET:.0f}%.",
+        "Step 5": f"A 10% OEE improvement = ~{total_cases_lost/n_days*0.1:,.0f} more cases/day.",
     })
 
     results["What to Focus On"] = pd.DataFrame(recs)
@@ -1599,7 +1810,8 @@ def write_excel(results, output_path):
             # What to Focus On
             if sheet_name == "What to Focus On":
                 ws.set_column(1, 1, 70)  # Finding
-                ws.set_column(2, 6, 58)  # Steps 1-5
+                ws.set_column(2, 2, 100) # The Work (evidence)
+                ws.set_column(3, 7, 58)  # Steps 1-5
 
             # Fault Summary
             if sheet_name == "Fault Summary":
@@ -1643,12 +1855,19 @@ def write_excel(results, output_path):
                     if val in ("SUMMARY", "SHIFT COMPARISON"):
                         ws.write(row_num + 3, 0, val, section_fmt)
 
+            # Worst Hours — What Happened column
+            if sheet_name == "Worst Hours":
+                if "What Happened" in df.columns:
+                    wh_col = list(df.columns).index("What Happened")
+                    ws.set_column(wh_col, wh_col, 80)
+
             # Shift Downtime
             if sheet_name == "Shift Downtime":
-                ws.set_column(0, 0, 18)   # Shift
-                ws.set_column(1, 1, 35)   # Cause
-                if "Minutes" in df.columns:
-                    col_idx = list(df.columns).index("Minutes")
+                ws.set_column(0, 0, 14)   # Date
+                ws.set_column(1, 1, 18)   # Shift
+                ws.set_column(2, 2, 35)   # Cause
+                if "Total Min" in df.columns:
+                    col_idx = list(df.columns).index("Total Min")
                     ws.conditional_format(3, col_idx, 3 + len(df), col_idx, {
                         "type": "3_color_scale",
                         "min_color": "#63BE7B", "mid_color": "#FFEB84", "max_color": "#F8696B",
