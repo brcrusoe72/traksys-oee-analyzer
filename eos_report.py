@@ -254,23 +254,38 @@ def consolidate(workbooks):
                 all_kpis[metric] = []
             all_kpis[metric].append(kpi["Value"])
 
-        # Shift comparison rows
+        # Shift comparison rows — attach top issue from same workbook
         sc = wb.get("shift_comparison", pd.DataFrame())
+        shift_dt = wb.get("shift_downtime_causes", {})
         if len(sc) > 0:
             for _, row in sc.iterrows():
                 r = {}
                 for col in sc.columns:
                     r[col] = row[col]
                 r["_source"] = wb["source_file"]
+                shift_name = str(row.get("Shift", ""))
+                causes_df = shift_dt.get(shift_name, pd.DataFrame())
+                if len(causes_df) > 0:
+                    r["Top Issue"] = str(causes_df.iloc[0, 0])
                 all_shift_rows.append(r)
                 if "Date" in r and pd.notna(r["Date"]):
                     dates_seen.add(str(r["Date"]))
 
-        # Loss breakdown
+        # Loss breakdown — attach top reason codes from same workbook
         lb = wb.get("loss_breakdown", pd.DataFrame())
         if len(lb) > 0:
             for _, row in lb.iterrows():
                 r = {col: row[col] for col in lb.columns}
+                shift_name = str(row.get("Shift", ""))
+                causes_df = shift_dt.get(shift_name, pd.DataFrame())
+                if len(causes_df) > 0:
+                    r["Top Issue"] = str(causes_df.iloc[0, 0])
+                    r["Top Issue Min"] = _safe_float(
+                        causes_df.iloc[0, 2]) if len(causes_df.columns) > 2 else 0
+                    if len(causes_df) > 1:
+                        r["Issue #2"] = str(causes_df.iloc[1, 0])
+                        r["Issue #2 Min"] = _safe_float(
+                            causes_df.iloc[1, 2]) if len(causes_df.columns) > 2 else 0
                 all_loss_rows.append(r)
 
         # Daily trend
@@ -530,8 +545,8 @@ class EOSReport(FPDF):
 
         shift_rows = data.get("shift_grid", [])
         if shift_rows:
-            widths = [18, 16, 12, 16, 14, 14, 14, 12, 12, 12]
-            headers = ["Date", "Shift", "OEE %", "Cases", "CPH", "Tgt CPH", "% Tgt", "A %", "P %", "Q %"]
+            widths = [18, 16, 12, 16, 14, 14, 14, 36]
+            headers = ["Date", "Shift", "OEE %", "Cases", "CPH", "Tgt CPH", "% Tgt", "Top Issue"]
             # Adjust widths to fit left column
             total_w = sum(widths)
             scale = (col_left_w - 2) / total_w
@@ -549,24 +564,22 @@ class EOSReport(FPDF):
                     f"{_safe_float(row.get('CPH', 0)):,.0f}",
                     f"{_safe_float(row.get('Target CPH', 0)):,.0f}",
                     f"{_safe_float(row.get('% of Target', 0)):.1f}",
-                    f"{_safe_float(row.get('Avail %', 0)):.1f}",
-                    f"{_safe_float(row.get('Perf %', 0)):.1f}",
-                    f"{_safe_float(row.get('Qual %', 0)):.1f}",
+                    str(row.get("Top Issue", ""))[:30],
                 ]
                 oee_color = _oee_color(oee_val)
                 self.set_x(col_left_x)
                 self._table_row(widths, values, highlight_col=2,
                                 highlight_color=oee_color, fill=(idx % 2 == 1))
 
-        # --- Loss Breakdown (below shift grid) ---
+        # --- Top Issues by Shift (below shift grid) ---
         self.ln(2)
         self.set_x(col_left_x)
-        self._section_header("Loss Breakdown by Shift")
+        self._section_header("Top Issues by Shift")
 
         loss_rows = data.get("loss_grid", [])
         if loss_rows:
-            widths = [18, 16, 16, 16, 16, 22, 18]
-            headers = ["Date", "Shift", "Avail Loss%", "Perf Loss%", "Qual Loss%", "Primary Driver", "Cases Lost"]
+            widths = [18, 16, 36, 14, 36, 14]
+            headers = ["Date", "Shift", "#1 Issue", "Min", "#2 Issue", "Min"]
             total_w = sum(widths)
             scale = (col_left_w - 2) / total_w
             widths = [w * scale for w in widths]
@@ -574,14 +587,17 @@ class EOSReport(FPDF):
             self._table_header(widths, headers)
 
             for idx, row in enumerate(loss_rows):
+                top1 = str(row.get("Top Issue", ""))[:28]
+                top1_min = _safe_float(row.get("Top Issue Min", 0))
+                top2 = str(row.get("Issue #2", ""))[:28]
+                top2_min = _safe_float(row.get("Issue #2 Min", 0))
                 values = [
                     str(row.get("Date", ""))[:10],
                     str(row.get("Shift", "")),
-                    f"{_safe_float(row.get('Avail Loss %', 0)):.1f}",
-                    f"{_safe_float(row.get('Perf Loss %', 0)):.1f}",
-                    f"{_safe_float(row.get('Qual Loss %', 0)):.1f}",
-                    str(row.get("Primary Driver", "")),
-                    f"{_safe_float(row.get('Cases Lost', 0)):,.0f}",
+                    top1,
+                    f"{top1_min:,.0f}" if top1 else "",
+                    top2,
+                    f"{top2_min:,.0f}" if top2 else "",
                 ]
                 self.set_x(col_left_x)
                 self._table_row(widths, values, fill=(idx % 2 == 1))
@@ -765,26 +781,15 @@ class EOSReport(FPDF):
         top_cause = pareto[0]["Cause"] if pareto else "Unknown"
         top_cause_min = f"{pareto[0]['Total Min']:,.0f} min" if pareto else "?? min"
 
-        # Determine primary loss driver from loss grid
-        loss_rows = data.get("loss_grid", [])
-        avail_total = sum(_safe_float(r.get("Avail Loss %", 0)) for r in loss_rows)
-        perf_total = sum(_safe_float(r.get("Perf Loss %", 0)) for r in loss_rows)
-        qual_total = sum(_safe_float(r.get("Qual Loss %", 0)) for r in loss_rows)
-        if avail_total >= perf_total and avail_total >= qual_total:
-            driver = "Availability"
-            driver_color = RED
-        elif perf_total >= qual_total:
-            driver = "Performance"
-            driver_color = ORANGE
-        else:
-            driver = "Quality"
-            driver_color = BLUE
+        # Second-highest cause for context
+        second_cause = pareto[1]["Cause"][:25] if len(pareto) > 1 else ""
+        second_min = f"{pareto[1]['Total Min']:,.0f} min" if len(pareto) > 1 else ""
 
         chain = [
             (f"OEE: {oee_val}", NAVY),
-            (f"Gap Driver: {driver}", driver_color),
-            (f"Top Cause: {top_cause[:25]}", RED),
+            (f"#1: {top_cause[:22]}", RED),
             (f"Impact: {top_cause_min}", ORANGE),
+            (f"#2: {second_cause}", NAVY if second_cause else MID_GRAY),
             ("Action: See IDS #1", GREEN),
         ]
 
