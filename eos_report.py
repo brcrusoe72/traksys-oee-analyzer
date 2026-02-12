@@ -903,7 +903,7 @@ def generate_eos_report_bytes(excel_paths):
     pdf.build_page1(data)
     pdf.build_page2(data)
 
-    return pdf.output(), data
+    return bytes(pdf.output()), data
 
 
 # ---------------------------------------------------------------------------
