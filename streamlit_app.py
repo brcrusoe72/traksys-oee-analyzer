@@ -275,6 +275,8 @@ with tab_eos:
                         tmp_paths.append(ef_path)
 
                     pdf_bytes, eos_data = generate_eos_report_bytes(tmp_paths)
+                    if isinstance(pdf_bytes, bytearray):
+                        pdf_bytes = bytes(pdf_bytes)
 
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M")
                     pdf_name = f"EOS_Report_{timestamp}.pdf"
