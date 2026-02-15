@@ -25,8 +25,6 @@ import pandas as pd
 
 from analyze import load_oee_data, load_downtime_data, analyze, write_excel, _aggregate_oee
 from parse_traksys import parse_oee_period_detail, parse_event_summary, detect_file_type
-from oee_history import save_run
-from analysis_report import generate_analysis_report_bytes
 from shared import SHIFT_HOURS
 
 st.set_page_config(
@@ -244,12 +242,6 @@ if oee_files:
                 output_path = os.path.join(tmp_dir, output_name)
                 write_excel(results, output_path)
 
-                # Save to history
-                try:
-                    save_run(results, hourly, shift_summary, overall, downtime)
-                except Exception:
-                    pass
-
                 want_excel = output_format in ("Excel (.xlsx)", "Both")
                 want_pdf = output_format in ("PDF Report (.pdf)", "Both")
 
@@ -267,6 +259,7 @@ if oee_files:
 
                 if want_pdf:
                     try:
+                        from analysis_report import generate_analysis_report_bytes
                         pdf_bytes, _report_data = generate_analysis_report_bytes([output_path])
                         if isinstance(pdf_bytes, bytearray):
                             pdf_bytes = bytes(pdf_bytes)
