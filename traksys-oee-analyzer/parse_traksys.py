@@ -146,24 +146,32 @@ def parse_oee_period_detail(filepath):
 
     Returns: (hourly_df, shift_summary_df, overall_df, hour_avg_df)
     """
-    wb = openpyxl.load_workbook(filepath, data_only=True)
-
-    # Use Sheet2 (hourly interval data)
-    hourly_sheet = "Sheet2" if "Sheet2" in wb.sheetnames else wb.sheetnames[1] if len(wb.sheetnames) > 1 else None
+    # Detect sheet name via read_only openpyxl (fast), then bulk-read with pandas
+    wb_ro = openpyxl.load_workbook(filepath, read_only=True)
+    hourly_sheet = "Sheet2" if "Sheet2" in wb_ro.sheetnames else wb_ro.sheetnames[1] if len(wb_ro.sheetnames) > 1 else None
+    wb_ro.close()
     if not hourly_sheet:
-        wb.close()
         raise ValueError("Cannot find hourly interval sheet")
 
-    ws = wb[hourly_sheet]
+    # Bulk-read all cells at once — much faster than data_only cell-by-cell
+    sheet_df = pd.read_excel(filepath, sheet_name=hourly_sheet, header=None)
+    data = sheet_df.values.tolist()  # list of lists, 0-indexed
+    max_row = len(data)
     raw_intervals = []
 
-    # Scan for blocks: Row+0 col B has a timestamp, data fields are in specific positions
-    row = 1
-    max_row = ws.max_row
+    def _cell(r, c):
+        """0-indexed row, 1-indexed col (matches original ws.cell convention)."""
+        if r < 0 or r >= max_row:
+            return None
+        if c < 1 or c > len(data[r]):
+            return None
+        return data[r][c - 1]
 
-    while row + BLOCK_SIZE - 1 <= max_row:
-        ts_raw = ws.cell(row, 2).value  # Col B: timestamp or label
-        if ts_raw is None or str(ts_raw).strip() == "":
+    # Scan for blocks: Row+0 col B has a timestamp, data fields are in specific positions
+    row = 0  # 0-indexed
+    while row + BLOCK_SIZE - 1 < max_row:
+        ts_raw = _cell(row, 2)  # Col B: timestamp or label
+        if ts_raw is None or (isinstance(ts_raw, float) and ts_raw != ts_raw) or str(ts_raw).strip() == "":
             row += 1
             continue
 
@@ -174,16 +182,16 @@ def parse_oee_period_detail(filepath):
             continue
 
         # Read interval data from block
-        good_cases = _safe_float(ws.cell(row, 4).value)       # Col D: good cases
-        avail      = _safe_float(ws.cell(row, 7).value)       # Col G: availability
-        perf       = _safe_float(ws.cell(row, 10).value)      # Col J: performance
-        qual       = _safe_float(ws.cell(row, 11).value)      # Col K: quality
-        oee        = _safe_float(ws.cell(row, 14).value)      # Col N: OEE
+        good_cases = _safe_float(_cell(row, 4))       # Col D: good cases
+        avail      = _safe_float(_cell(row, 7))       # Col G: availability
+        perf       = _safe_float(_cell(row, 10))      # Col J: performance
+        qual       = _safe_float(_cell(row, 11))      # Col K: quality
+        oee        = _safe_float(_cell(row, 14))      # Col N: OEE
 
         # Detail fields are in Col E (column 5)
-        dur_str    = ws.cell(row + 2, 5).value                # Row+2: duration
-        shift_raw  = ws.cell(row + 5, 5).value                # Row+5: shift
-        product    = ws.cell(row + 4, 5).value                # Row+4: product name
+        dur_str    = _cell(row + 2, 5)                # Row+2: duration
+        shift_raw  = _cell(row + 5, 5)                # Row+5: shift
+        product    = _cell(row + 4, 5)                # Row+4: product name
 
         shift = _get_shift(shift_raw)
         if shift is None:
@@ -213,8 +221,6 @@ def parse_oee_period_detail(filepath):
         })
 
         row += BLOCK_SIZE
-
-    wb.close()
 
     if not raw_intervals:
         raise ValueError("No production intervals found in OEE Period Detail file")
@@ -358,22 +364,35 @@ def parse_event_summary(filepath):
       - events_df: individual timestamped events with reason, shift, duration
       - shift_reasons_df: events grouped by (shift, reason) for shift-level Pareto
     """
-    wb = openpyxl.load_workbook(filepath, data_only=True)
-    ws = wb.active
+    # Bulk-read all cells at once — much faster than openpyxl data_only cell-by-cell
+    sheet_df = pd.read_excel(filepath, sheet_name=0, header=None)
+    data = sheet_df.values.tolist()  # 0-indexed
+    max_row = len(data)
+
+    def _cell(r, c):
+        """0-indexed row, 1-indexed col."""
+        if r < 0 or r >= max_row:
+            return None
+        if c < 1 or c > len(data[r]):
+            return None
+        v = data[r][c - 1]
+        if isinstance(v, float) and v != v:  # NaN
+            return None
+        return v
 
     reasons = []
     events = []
     current_reason = None
 
-    for r in range(6, ws.max_row + 1):
-        col_b = ws.cell(r, 2).value   # Line name (row 6 only)
-        col_c = ws.cell(r, 3).value   # Reason code group
-        col_d = ws.cell(r, 4).value   # Start time (individual events)
-        col_e = ws.cell(r, 5).value   # End time
-        col_f = ws.cell(r, 6).value   # Shift
-        col_g = ws.cell(r, 7).value   # OEE type (Availability Loss, etc.)
-        col_j = ws.cell(r, 10).value  # Count
-        col_n = ws.cell(r, 14).value  # Total duration
+    for r in range(5, max_row):  # 0-indexed row 5 = original row 6
+        col_b = _cell(r, 2)   # Line name (row 6 only)
+        col_c = _cell(r, 3)   # Reason code group
+        col_d = _cell(r, 4)   # Start time (individual events)
+        col_e = _cell(r, 5)   # End time
+        col_f = _cell(r, 6)   # Shift
+        col_g = _cell(r, 7)   # OEE type (Availability Loss, etc.)
+        col_j = _cell(r, 10)  # Count
+        col_n = _cell(r, 14)  # Total duration
 
         # Skip Line total row
         if col_b and "Line" in str(col_b):
@@ -414,8 +433,6 @@ def parse_event_summary(filepath):
                 "oee_type": oee_type,
                 "duration_minutes": round(dur, 1),
             })
-
-    wb.close()
 
     reasons_df = (
         pd.DataFrame(reasons) if reasons
