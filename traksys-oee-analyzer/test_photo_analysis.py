@@ -5,7 +5,10 @@ Tests for photo_analysis.py — pure logic only, no OpenAI API calls.
 import pytest
 import pandas as pd
 
-from photo_analysis import _map_to_equipment_scan, findings_to_downtime_dict, _image_media_type
+from photo_analysis import (
+    _map_to_equipment_scan, findings_to_downtime_dict, _image_media_type,
+    _match_shift_to_data, build_photo_narrative, _DEFAULT_DURATION_MIN,
+)
 
 
 class TestMapToEquipmentScan:
@@ -76,11 +79,17 @@ class TestFindingsToDowntimeDict:
         required_keys = {"events_df", "reasons_df", "shift_reasons_df", "pareto_df", "findings"}
         assert required_keys.issubset(set(result.keys()))
 
-    def test_no_duration_defaults_to_zero(self):
+    def test_no_duration_defaults_to_estimated(self):
         findings = [{"issues": [{"equipment": "Depal", "description": "suction cup issue", "duration_minutes": None, "shift": "3rd Shift", "severity": "medium"}]}]
         result = findings_to_downtime_dict(findings, ["photo.jpg"])
         assert result is not None
-        assert result["events_df"].iloc[0]["duration_minutes"] == 0.0
+        assert result["events_df"].iloc[0]["duration_minutes"] == _DEFAULT_DURATION_MIN
+
+    def test_zero_duration_defaults_to_estimated(self):
+        findings = [{"issues": [{"equipment": "Depal", "description": "issue", "duration_minutes": 0, "shift": "", "severity": "low"}]}]
+        result = findings_to_downtime_dict(findings, ["photo.jpg"])
+        assert result is not None
+        assert result["events_df"].iloc[0]["duration_minutes"] == _DEFAULT_DURATION_MIN
 
     def test_keyword_equipment_mapping_in_findings(self):
         """Equipment names from AI get mapped to canonical EQUIPMENT_SCAN keys."""
@@ -97,6 +106,53 @@ class TestFindingsToDowntimeDict:
         result = findings_to_downtime_dict(findings, ["photo.jpg"])
         assert result is not None
         assert len(result["shift_reasons_df"]) > 0
+
+
+    def test_shift_matched_to_data_format(self):
+        """Shift names from AI get mapped to actual data shift names."""
+        data_shifts = ["1st (7a-3p)", "2nd (3p-11p)", "3rd (11p-7a)"]
+        findings = [{"issues": [{"equipment": "Riverwood", "description": "jam", "duration_minutes": 20, "shift": "1st Shift", "severity": "high"}]}]
+        result = findings_to_downtime_dict(findings, ["photo.jpg"], data_shifts=data_shifts)
+        assert result is not None
+        assert result["events_df"].iloc[0]["shift"] == "1st (7a-3p)"
+
+
+class TestMatchShiftToData:
+    def test_exact_prefix_match(self):
+        assert _match_shift_to_data("1st Shift", ["1st (7a-3p)", "2nd (3p-11p)"]) == "1st (7a-3p)"
+
+    def test_already_matching(self):
+        assert _match_shift_to_data("1st Shift", ["1st Shift", "2nd Shift"]) == "1st Shift"
+
+    def test_no_match_returns_original(self):
+        assert _match_shift_to_data("1st Shift", ["A Shift", "B Shift"]) == "1st Shift"
+
+    def test_empty_shift_returns_empty(self):
+        assert _match_shift_to_data("", ["1st Shift"]) == ""
+
+    def test_none_data_shifts(self):
+        assert _match_shift_to_data("1st Shift", None) == "1st Shift"
+
+
+class TestBuildPhotoNarrative:
+    def test_returns_narrative_with_issues(self):
+        results = [("photo.jpg", {
+            "issues": [{"equipment": "Riverwood", "description": "fiber jam", "duration_minutes": 30}],
+            "shift_notes": ["running low on fiber"],
+            "production_notes": [],
+        })]
+        text = build_photo_narrative(results)
+        assert "Riverwood" in text
+        assert "fiber jam" in text
+        assert "running low on fiber" in text
+
+    def test_returns_empty_for_no_findings(self):
+        results = [("photo.jpg", {"issues": [], "shift_notes": [], "production_notes": []})]
+        assert build_photo_narrative(results) == ""
+
+    def test_skips_error_findings(self):
+        results = [("photo.jpg", {"error": "fail", "issues": [], "shift_notes": [], "production_notes": []})]
+        assert build_photo_narrative(results) == ""
 
 
 class TestImageMediaType:

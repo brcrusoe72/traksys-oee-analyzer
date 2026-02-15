@@ -17,6 +17,19 @@ import pandas as pd
 
 from shared import EQUIPMENT_SCAN, classify_fault
 
+# Default duration (minutes) for photo-extracted issues when the AI
+# doesn't report a specific duration.  15 min is a conservative estimate
+# that ensures photo issues are visible in Pareto rankings.
+_DEFAULT_DURATION_MIN = 15.0
+
+# Map display shift names ("1st Shift") to common data-format prefixes
+# so we can match against whatever format the hourly data uses.
+_SHIFT_PREFIXES = {
+    "1st Shift": "1st",
+    "2nd Shift": "2nd",
+    "3rd Shift": "3rd",
+}
+
 
 def _image_media_type(filepath):
     """Return MIME media type for an image file."""
@@ -60,6 +73,54 @@ def _map_to_equipment_scan(name):
         if any(kw in lower for kw in keywords):
             return equip_name
     return name
+
+
+def _match_shift_to_data(ai_shift, data_shifts):
+    """Map AI shift name ('1st Shift') to the actual shift name in the data.
+
+    data_shifts is a list of shift names from hourly['shift'].unique().
+    Returns the matching data shift name, or the original ai_shift if no match.
+    """
+    if not ai_shift or not data_shifts:
+        return ai_shift or ""
+    prefix = _SHIFT_PREFIXES.get(ai_shift, ai_shift.split()[0] if ai_shift else "")
+    for ds in data_shifts:
+        if ds.lower().startswith(prefix.lower()):
+            return ds
+    return ai_shift
+
+
+def build_photo_narrative(display_results):
+    """Build a short narrative paragraph from photo analysis results.
+
+    Returns a string suitable for appending to shift narratives, or ""
+    if there's nothing useful to report.
+    """
+    all_issues = []
+    all_notes = []
+    for pname, findings in display_results:
+        if not findings or "error" in findings:
+            continue
+        for issue in findings.get("issues", []):
+            equip = _map_to_equipment_scan(issue.get("equipment", "")) or issue.get("equipment", "?")
+            desc = issue.get("description", "")
+            dur = issue.get("duration_minutes")
+            dur_str = f" ({dur} min)" if dur else ""
+            all_issues.append(f"{equip}: {desc}{dur_str}")
+        for note in findings.get("shift_notes", []):
+            all_notes.append(note)
+        for note in findings.get("production_notes", []):
+            all_notes.append(note)
+
+    if not all_issues and not all_notes:
+        return ""
+
+    parts = []
+    if all_issues:
+        parts.append("**From context photos:** " + "; ".join(all_issues[:5]) + ".")
+    if all_notes:
+        parts.append("Photo notes: " + "; ".join(all_notes[:3]) + ".")
+    return "\n\n" + " ".join(parts)
 
 
 def _build_prompt():
@@ -139,7 +200,7 @@ def analyze_photo(filepath, api_key):
                 "shift_notes": [], "raw_text": ""}
 
 
-def findings_to_downtime_dict(findings_list, photo_names):
+def findings_to_downtime_dict(findings_list, photo_names, data_shifts=None):
     """Convert extracted issues into standard downtime dict format.
 
     Parameters
@@ -148,6 +209,9 @@ def findings_to_downtime_dict(findings_list, photo_names):
         One findings dict per photo (from analyze_photo).
     photo_names : list of str
         Corresponding photo filenames.
+    data_shifts : list of str, optional
+        Shift names from the hourly data (e.g. ["1st Shift", "1st (7a-3p)"]).
+        Used to match AI-provided shift names to the data format.
 
     Returns
     -------
@@ -164,8 +228,10 @@ def findings_to_downtime_dict(findings_list, photo_names):
             equip = _map_to_equipment_scan(equip_raw) or equip_raw
             desc = issue.get("description", "")
             reason = f"{equip}: {desc}" if equip and desc else (equip or desc or "Unknown (photo)")
-            duration = float(issue.get("duration_minutes") or 0)
-            shift = issue.get("shift") or ""
+            raw_dur = issue.get("duration_minutes")
+            duration = float(raw_dur) if raw_dur else _DEFAULT_DURATION_MIN
+            ai_shift = issue.get("shift") or ""
+            shift = _match_shift_to_data(ai_shift, data_shifts) if data_shifts else ai_shift
 
             events.append({
                 "reason": reason,
@@ -227,13 +293,15 @@ def findings_to_downtime_dict(findings_list, photo_names):
     }
 
 
-def analyze_photos(photo_list, api_key):
+def analyze_photos(photo_list, api_key, data_shifts=None):
     """Analyze all photos and return (downtime_dict, display_results).
 
     Parameters
     ----------
     photo_list : list of (name, filepath) tuples
     api_key : str
+    data_shifts : list of str, optional
+        Shift names from the hourly data for shift name matching.
 
     Returns
     -------
@@ -249,5 +317,5 @@ def analyze_photos(photo_list, api_key):
         photo_names.append(pname)
         display_results.append((pname, findings))
 
-    dt_dict = findings_to_downtime_dict(findings_list, photo_names)
+    dt_dict = findings_to_downtime_dict(findings_list, photo_names, data_shifts)
     return dt_dict, display_results

@@ -244,7 +244,9 @@ if oee_files:
                         from photo_analysis import get_openai_api_key, analyze_photos
                         api_key = get_openai_api_key()
                         if api_key:
-                            photo_dt, photo_display_results = analyze_photos(context_photos, api_key)
+                            data_shifts = list(hourly["shift"].unique())
+                            photo_dt, photo_display_results = analyze_photos(
+                                context_photos, api_key, data_shifts=data_shifts)
                             if photo_dt:
                                 dt_by_line.setdefault("All", []).append(photo_dt)
                                 n_issues = len(photo_dt["events_df"])
@@ -300,8 +302,10 @@ if oee_files:
                     line_ss = ss_agg
                     line_hourly.drop(columns=["_is_prod", "_prod_hours", "_w_oee"], inplace=True, errors="ignore")
 
-                    # Match downtime to this line
-                    line_dt_list = dt_by_line.get(line_name, []) + dt_by_line.get("All", [])
+                    # Match downtime to this line (avoid double-counting "All" when line IS "All")
+                    line_dt_list = dt_by_line.get(line_name, [])
+                    if line_name != "All":
+                        line_dt_list = line_dt_list + dt_by_line.get("All", [])
                     line_downtime = _merge_downtime_dicts(line_dt_list) if line_dt_list else None
 
                     # Build output filename
@@ -314,6 +318,18 @@ if oee_files:
                     output_path = os.path.join(tmp_dir, output_name)
 
                     results = analyze(line_hourly, line_ss, line_overall, line_hour_avg, line_downtime)
+
+                    # Inject photo findings into shift narratives so they appear
+                    # in the Excel output regardless of downtime pipeline matching
+                    if photo_display_results:
+                        from photo_analysis import build_photo_narrative
+                        photo_narrative = build_photo_narrative(photo_display_results)
+                        if photo_narrative:
+                            for shift_key in ["1st Shift", "2nd Shift", "3rd Shift"]:
+                                shift_data = results.get(shift_key)
+                                if isinstance(shift_data, dict) and "narrative" in shift_data:
+                                    shift_data["narrative"] += photo_narrative
+
                     write_excel(results, output_path)
 
                     # Display results under a line header
