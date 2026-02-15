@@ -237,6 +237,21 @@ if oee_files:
                             except Exception as e:
                                 st.warning(f"Could not parse {cf.name}: {e}")
 
+                # Analyze context photos via OpenAI Vision
+                photo_display_results = []
+                if context_photos:
+                    try:
+                        from photo_analysis import get_openai_api_key, analyze_photos
+                        api_key = get_openai_api_key()
+                        if api_key:
+                            photo_dt, photo_display_results = analyze_photos(context_photos, api_key)
+                            if photo_dt:
+                                dt_by_line.setdefault("All", []).append(photo_dt)
+                                n_issues = len(photo_dt["events_df"])
+                                st.info(f"Photo analysis: extracted {n_issues} issue(s) from {len(context_photos)} photo(s)")
+                    except Exception as photo_err:
+                        st.warning(f"Photo analysis failed (non-blocking): {photo_err}")
+
                 # Determine lines present in the data
                 lines = sorted(hourly["line"].unique())
                 multi_line = len(lines) > 1 or (len(lines) == 1 and lines[0] != "All")
@@ -375,14 +390,41 @@ if oee_files:
                     if multi_line:
                         st.divider()
 
-                # Display context photos (shared across lines)
+                # Display context photos with AI results
                 if context_photos:
                     with st.expander(f"Context Photos ({len(context_photos)})", expanded=True):
-                        st.caption("Photos are displayed for reference. Automated photo analysis is not yet available.")
-                        photo_cols = st.columns(min(3, len(context_photos)))
-                        for i, (pname, ppath) in enumerate(context_photos):
-                            with photo_cols[i % 3]:
-                                st.image(ppath, caption=pname, use_container_width=True)
+                        # Build lookup from display results
+                        photo_findings = {name: findings for name, findings in photo_display_results}
+                        if not photo_findings:
+                            from photo_analysis import get_openai_api_key
+                            if not get_openai_api_key():
+                                st.caption("Set `OPENAI_API_KEY` in environment or Streamlit secrets to enable photo analysis.")
+                            else:
+                                st.caption("Photos displayed for reference.")
+                        for pname, ppath in context_photos:
+                            st.image(ppath, caption=pname, use_container_width=True)
+                            findings = photo_findings.get(pname)
+                            if findings and "error" not in findings:
+                                ptype = findings.get("photo_type", "unknown")
+                                conf = findings.get("confidence", "?")
+                                st.caption(f"Type: {ptype} | Confidence: {conf}")
+                                for issue in findings.get("issues", []):
+                                    dur = issue.get("duration_minutes")
+                                    dur_str = f" ({dur} min)" if dur else ""
+                                    sev = issue.get("severity", "")
+                                    sev_badge = {"high": " :red[HIGH]", "medium": " :orange[MED]", "low": ""}.get(sev, "")
+                                    st.markdown(f"- **{issue.get('equipment', '?')}**: {issue.get('description', '')}{dur_str}{sev_badge}")
+                                for note in findings.get("shift_notes", []):
+                                    st.markdown(f"- *Shift note:* {note}")
+                                for note in findings.get("production_notes", []):
+                                    st.markdown(f"- *Production:* {note}")
+                                raw = findings.get("raw_text", "")
+                                if raw:
+                                    with st.expander("Raw text", expanded=False):
+                                        st.text(raw)
+                            elif findings and "error" in findings:
+                                st.caption(f"Analysis error: {findings['error']}")
+                            st.markdown("---")
 
             except ValueError as e:
                 err_msg = str(e)
