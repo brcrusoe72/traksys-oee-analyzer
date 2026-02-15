@@ -244,13 +244,20 @@ if oee_files:
                         from photo_analysis import get_openai_api_key, analyze_photos
                         api_key = get_openai_api_key()
                         if api_key:
+                            st.info(f"Analyzing {len(context_photos)} photo(s) with AI vision...")
                             data_shifts = list(hourly["shift"].unique())
                             photo_dt, photo_display_results = analyze_photos(
                                 context_photos, api_key, data_shifts=data_shifts)
+                            # Surface any per-photo errors
+                            for pname, findings in photo_display_results:
+                                if findings and "error" in findings:
+                                    st.warning(f"Photo `{pname}`: {findings['error']}")
                             if photo_dt:
                                 dt_by_line.setdefault("All", []).append(photo_dt)
                                 n_issues = len(photo_dt["events_df"])
-                                st.info(f"Photo analysis: extracted {n_issues} issue(s) from {len(context_photos)} photo(s)")
+                                st.success(f"Photo analysis: extracted {n_issues} issue(s) from {len(context_photos)} photo(s)")
+                            else:
+                                st.info("Photo analysis: no equipment issues extracted from photos.")
                         else:
                             st.warning(
                                 "**Photo analysis skipped** — no OpenAI API key found. "
