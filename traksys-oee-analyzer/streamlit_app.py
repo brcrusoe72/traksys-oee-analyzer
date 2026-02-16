@@ -333,15 +333,19 @@ if oee_files:
                     results = analyze(line_hourly, line_ss, line_overall, line_hour_avg, line_downtime,
                                       photo_findings=photo_display_results or None)
 
-                    # Inject photo findings into shift narratives so they appear
-                    # in the Excel output regardless of downtime pipeline matching
+                    # Inject photo findings into shift narratives — shift-specific
+                    # so each shift only sees issues the AI assigned to that shift
+                    # (plus unassigned issues that could apply to any shift).
                     if photo_display_results:
                         from photo_analysis import build_photo_narrative
-                        photo_narrative = build_photo_narrative(photo_display_results)
-                        if photo_narrative:
-                            for shift_key in ["1st Shift", "2nd Shift", "3rd Shift"]:
-                                shift_data = results.get(shift_key)
-                                if isinstance(shift_data, dict) and "narrative" in shift_data:
+                        _shift_prefixes = {"1st Shift": "1st", "2nd Shift": "2nd", "3rd Shift": "3rd"}
+                        for shift_key in ["1st Shift", "2nd Shift", "3rd Shift"]:
+                            shift_data = results.get(shift_key)
+                            if isinstance(shift_data, dict) and "narrative" in shift_data:
+                                prefix = _shift_prefixes.get(shift_key, "")
+                                photo_narrative = build_photo_narrative(
+                                    photo_display_results, shift_filter=prefix)
+                                if photo_narrative:
                                     shift_data["narrative"] += photo_narrative
 
                     write_excel(results, output_path)

@@ -719,6 +719,20 @@ class AnalysisReport(FPDF):
 
         # === SHIFT SUMMARIES (fresh from consolidated data) ===
         fresh_summaries = _build_fresh_summaries(shift_rows, pareto)
+        # Append photo context from Excel narratives to fresh summaries
+        for sname in ["1st Shift", "2nd Shift", "3rd Shift"]:
+            narr_list = narratives.get(sname, [])
+            for narr_text in narr_list:
+                if "from context photos" in narr_text.lower():
+                    # Extract the photo line(s) from the narrative
+                    for line in narr_text.split("\n"):
+                        stripped = line.strip()
+                        if stripped.lower().startswith("**from context photos"):
+                            # Remove markdown bold markers for PDF
+                            clean = stripped.replace("**", "")
+                            if sname in fresh_summaries:
+                                fresh_summaries[sname] += " " + clean
+                            break
         active_shifts = [s for s in ["1st Shift", "2nd Shift", "3rd Shift"]
                          if fresh_summaries.get(s) or narratives.get(s)]
         if active_shifts:
@@ -742,6 +756,15 @@ class AnalysisReport(FPDF):
         # === IDS ACTION ITEMS (fresh from consolidated data) ===
         fresh_actions = _build_fresh_actions(shift_rows, pareto)
         display_actions = fresh_actions if fresh_actions else ids_items
+        # Include photo findings from focus items if they exist — they
+        # have unique context (whiteboards, work orders) that machine
+        # data can't capture, so they should always surface.
+        photo_items = [item for item in ids_items
+                       if "photo" in str(item.get("Finding", "")).lower()]
+        if photo_items and fresh_actions:
+            for pi in photo_items:
+                pi["Priority"] = len(display_actions) + 1
+                display_actions.append(pi)
         if display_actions:
             self._ensure_space(15)
             self._section_header("IDS -- Action Items", font_size=FONT_SEC)

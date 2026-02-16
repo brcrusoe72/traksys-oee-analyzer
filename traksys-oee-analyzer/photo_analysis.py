@@ -103,8 +103,16 @@ def _match_shift_to_data(ai_shift, data_shifts):
     return ai_shift
 
 
-def build_photo_narrative(display_results):
+def build_photo_narrative(display_results, shift_filter=None):
     """Build a short narrative paragraph from photo analysis results.
+
+    Parameters
+    ----------
+    display_results : list of (name, findings_dict) tuples
+    shift_filter : str, optional
+        If provided, only include issues whose AI-assigned shift matches
+        this prefix (e.g. "1st", "2nd", "3rd").  Issues with no shift
+        assigned are always included.
 
     Returns a string suitable for appending to shift narratives, or ""
     if there's nothing useful to report.
@@ -115,6 +123,12 @@ def build_photo_narrative(display_results):
         if not findings or "error" in findings:
             continue
         for issue in findings.get("issues", []):
+            # Filter by shift if requested
+            if shift_filter:
+                issue_shift = issue.get("shift", "") or ""
+                prefix = _SHIFT_PREFIXES.get(issue_shift, issue_shift.split()[0] if issue_shift else "")
+                if prefix and prefix.lower() != shift_filter.lower():
+                    continue  # skip issues assigned to a different shift
             equip = _map_to_equipment_scan(issue.get("equipment", "")) or issue.get("equipment", "?")
             desc = issue.get("description", "")
             dur = issue.get("duration_minutes")

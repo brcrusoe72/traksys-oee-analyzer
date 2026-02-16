@@ -1560,6 +1560,8 @@ def _build_plant_summary(hourly, shift_summary, overall, downtime):
                 s_product = _PRODUCT_CODE_TO_PACK.get(raw, _PRODUCT_CODE_TO_PACK.get(raw.upper(), raw))
 
         # Top Issue — from events_df filtered to this date AND shift
+        # Photo events have start_time=NaT (no date); include them alongside
+        # date-matched events so photo-extracted issues surface here.
         s_top_issue = ""
         s_top_issue_min = 0
         if events_df is not None and len(events_df) > 0:
@@ -1568,7 +1570,8 @@ def _build_plant_summary(hourly, shift_summary, overall, downtime):
             if len(shift_ev) > 0 and "start_time" in shift_ev.columns:
                 shift_ev["_date"] = shift_ev["start_time"].apply(
                     lambda x: x.strftime("%Y-%m-%d") if not pd.isna(x) and hasattr(x, "strftime") else "")
-                day_shift_ev = shift_ev[shift_ev["_date"] == date_val]
+                # Include events matching this date + photo events (empty _date)
+                day_shift_ev = shift_ev[(shift_ev["_date"] == date_val) | (shift_ev["_date"] == "")]
                 day_shift_ev = day_shift_ev[~day_shift_ev["reason"].isin(EXCLUDE_REASONS)]
                 if len(day_shift_ev) > 0:
                     cause_agg = day_shift_ev.groupby("reason")["duration_minutes"].sum()
