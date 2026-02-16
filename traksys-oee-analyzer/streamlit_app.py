@@ -691,6 +691,10 @@ with tab_trend:
                 date_range = f"{runs_df['date_from'].iloc[0]} to {runs_df['date_from'].iloc[-1]}"
                 st.success(f"Loaded {n_reports} reports | Date range: {date_range}")
 
+                # Initialize for use in Section E
+                dt_classes = []
+                shift_trends = {}
+
                 # -------------------------------------------------------
                 # Section A: OEE Trend with SPC
                 # -------------------------------------------------------
@@ -933,33 +937,56 @@ with tab_trend:
                 st.divider()
 
                 # -------------------------------------------------------
-                # Section E: Recurring Action Items (aggregated)
+                # Section E: Action Items (synthesized from trend data)
                 # -------------------------------------------------------
-                st.markdown("### Recurring Action Items")
+                st.markdown("### Action Items")
 
-                all_focus = []
-                seen_findings = set()
-                for wb in workbooks:
-                    fi = wb.get("focus_items", pd.DataFrame())
-                    if len(fi) > 0:
-                        for _, row in fi.iterrows():
-                            finding = str(row.get("Finding", ""))
-                            if finding and finding != "nan" and finding not in seen_findings:
-                                seen_findings.add(finding)
-                                all_focus.append(row.to_dict())
+                # Build smart action items from trend-level analysis
+                smart_items = []
+                try:
+                    from db import build_smart_action_items
+                    smart_items = build_smart_action_items(
+                        dt_classes, runs_df, shift_trends=shift_trends
+                    )
+                except Exception:
+                    pass
 
-                if all_focus:
-                    # Sort by priority
-                    all_focus.sort(key=lambda x: _safe_float_val(x.get("Priority", 99)))
-                    for item in all_focus[:10]:
-                        priority = item.get("Priority", "")
-                        finding = str(item.get("Finding", ""))
-                        if priority:
-                            st.markdown(f"**#{int(_safe_float_val(priority))}:** {finding}")
-                        else:
-                            st.markdown(f"- {finding}")
+                if smart_items:
+                    # Check if database is enhancing the items
+                    try:
+                        from db import is_connected
+                        if is_connected():
+                            st.caption("Equipment knowledge and baselines active")
+                    except Exception:
+                        pass
+
+                    for item in smart_items:
+                        st.markdown(f"**#{item['priority']}:** {item['finding']}")
+                        st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;*{item['action']}*")
                 else:
-                    st.info("No action items found in uploaded workbooks.")
+                    # Fallback: deduplicated focus items from workbooks
+                    all_focus = []
+                    seen_findings = set()
+                    for wb in workbooks:
+                        fi = wb.get("focus_items", pd.DataFrame())
+                        if len(fi) > 0:
+                            for _, row in fi.iterrows():
+                                finding = str(row.get("Finding", ""))
+                                if finding and finding != "nan" and finding not in seen_findings:
+                                    seen_findings.add(finding)
+                                    all_focus.append(row.to_dict())
+
+                    if all_focus:
+                        all_focus.sort(key=lambda x: _safe_float_val(x.get("Priority", 99)))
+                        for item in all_focus[:10]:
+                            priority = item.get("Priority", "")
+                            finding = str(item.get("Finding", ""))
+                            if priority:
+                                st.markdown(f"**#{int(_safe_float_val(priority))}:** {finding}")
+                            else:
+                                st.markdown(f"- {finding}")
+                    else:
+                        st.info("No action items found in uploaded workbooks.")
 
         except Exception as e:
             st.error(f"Trend analysis failed: {e}")

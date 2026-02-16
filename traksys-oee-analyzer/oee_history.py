@@ -242,6 +242,13 @@ def save_run(results, hourly, shift_summary, overall, downtime=None):
     except Exception:
         pass  # deep history failure should never block the main save
 
+    # Persist to Supabase if configured
+    try:
+        from db import save_run_to_db
+        save_run_to_db(record)
+    except Exception:
+        pass  # database failure should never block the save
+
     # Tend the garden after every save
     try:
         tend_garden()
@@ -843,6 +850,34 @@ def tend_garden():
 
     with open(TRENDS_FILE, "w", encoding="utf-8") as f:
         json.dump(trends, f, indent=2, default=str)
+
+    # Update Supabase baselines if configured
+    try:
+        from db import upsert_baseline
+        if len(downtime) > 0:
+            cause_stats = (
+                downtime.groupby("cause")
+                .agg(
+                    avg_minutes=("minutes", "mean"),
+                    std_minutes=("minutes", "std"),
+                    min_minutes=("minutes", "min"),
+                    max_minutes=("minutes", "max"),
+                    n_events=("minutes", "count"),
+                )
+                .reset_index()
+            )
+            for _, row in cause_stats.iterrows():
+                std_val = float(row["std_minutes"]) if pd.notna(row["std_minutes"]) else 0
+                upsert_baseline(
+                    cause=row["cause"],
+                    avg_minutes=float(row["avg_minutes"]),
+                    std_minutes=std_val,
+                    min_minutes=float(row["min_minutes"]),
+                    max_minutes=float(row["max_minutes"]),
+                    n_events=int(row["n_events"]),
+                )
+    except Exception:
+        pass  # database failure should never block gardening
 
     # Compact raw JSONL files to reclaim space from duplicates
     try:
