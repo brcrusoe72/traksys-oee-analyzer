@@ -1679,8 +1679,16 @@ def _build_plant_summary(hourly, shift_summary, overall, downtime):
 # ---------------------------------------------------------------------------
 # Main Analysis
 # ---------------------------------------------------------------------------
-def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
+def analyze(hourly, shift_summary, overall, hour_avg, downtime=None,
+            photo_findings=None):
     """Produce shift-centric analysis: Plant Summary + per-shift sheets + What to Focus On.
+
+    Parameters
+    ----------
+    photo_findings : list of (name, findings_dict) tuples, optional
+        Results from photo analysis (equipment issues, shift notes, production
+        notes).  Surfaced as dedicated action items in the "What to Focus On"
+        sheet.
 
     Returns dict where:
       - "Plant Summary" → dict with sub-tables (title, subtitle, kpis, shift_comparison, etc.)
@@ -2046,6 +2054,50 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None):
                 "Step 3": "Startup checklist: materials staged, settings verified, passdown <10 min.",
                 "Step 4": "Consider 15-min shift overlap for running handoff.",
                 "Step 5": f"Goal: close startup gap from {oee_gap_startup:.0f} to under 3 points.",
+            })
+            priority += 1
+
+    # === PHOTO FINDINGS ===
+    # Surface equipment issues and notes extracted from context photos so
+    # they appear as explicit action items alongside machine-data findings.
+    if photo_findings:
+        photo_issues = []
+        photo_notes = []
+        for pname, findings in photo_findings:
+            if not isinstance(findings, dict) or "error" in findings:
+                continue
+            for issue in findings.get("issues", []):
+                equip = issue.get("equipment", "Unknown")
+                desc = issue.get("description", "")
+                dur = issue.get("duration_minutes")
+                shift = issue.get("shift", "")
+                severity = issue.get("severity", "")
+                dur_str = f" ({dur} min)" if dur else ""
+                shift_str = f" [{shift}]" if shift else ""
+                sev_str = f" — {severity}" if severity else ""
+                photo_issues.append(f"{equip}: {desc}{dur_str}{shift_str}{sev_str}")
+            for note in findings.get("shift_notes", []):
+                photo_notes.append(note)
+            for note in findings.get("production_notes", []):
+                photo_notes.append(note)
+
+        if photo_issues:
+            issues_text = "; ".join(photo_issues[:8])
+            notes_text = (" | Notes: " + "; ".join(photo_notes[:4])) if photo_notes else ""
+            recs.append({
+                "Priority": priority,
+                "Finding": f"Context photos flagged {len(photo_issues)} issue(s)",
+                "The Work": (
+                    f"Photo-extracted findings: {issues_text}.{notes_text} "
+                    f"These are from uploaded context photos (whiteboards, work orders, shift notes). "
+                    f"Cross-reference with machine data above to determine if these are the same events "
+                    f"or additional issues not captured by Traksys."
+                ),
+                "Step 1": "Review the photo findings above — do they match machine-data downtime causes?",
+                "Step 2": "If new issues: add to downtime tracking so they appear in future Pareto analysis.",
+                "Step 3": "If duplicates: confirms machine data accuracy — no action needed.",
+                "Step 4": "Use photo context (work orders, notes) to understand WHY, not just WHAT.",
+                "Step 5": "Continue uploading context photos — they fill gaps machine data can't capture.",
             })
             priority += 1
 

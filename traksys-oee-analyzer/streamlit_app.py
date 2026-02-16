@@ -330,7 +330,8 @@ if oee_files:
                     output_name = f"{basename}{line_tag}{suffix}_{timestamp}.xlsx"
                     output_path = os.path.join(tmp_dir, output_name)
 
-                    results = analyze(line_hourly, line_ss, line_overall, line_hour_avg, line_downtime)
+                    results = analyze(line_hourly, line_ss, line_overall, line_hour_avg, line_downtime,
+                                      photo_findings=photo_display_results or None)
 
                     # Inject photo findings into shift narratives so they appear
                     # in the Excel output regardless of downtime pipeline matching
