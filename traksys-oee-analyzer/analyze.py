@@ -1567,7 +1567,7 @@ def _build_plant_summary(hourly, shift_summary, overall, downtime):
             shift_ev = events_df[events_df["shift"] == display_shift].copy()
             if len(shift_ev) > 0 and "start_time" in shift_ev.columns:
                 shift_ev["_date"] = shift_ev["start_time"].apply(
-                    lambda x: x.strftime("%Y-%m-%d") if hasattr(x, "strftime") else "")
+                    lambda x: x.strftime("%Y-%m-%d") if not pd.isna(x) and hasattr(x, "strftime") else "")
                 day_shift_ev = shift_ev[shift_ev["_date"] == date_val]
                 day_shift_ev = day_shift_ev[~day_shift_ev["reason"].isin(EXCLUDE_REASONS)]
                 if len(day_shift_ev) > 0:
