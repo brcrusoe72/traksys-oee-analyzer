@@ -195,31 +195,28 @@ def analyze_photo(filepath, api_key, model_name=None):
         ],
     }]
 
-    # GPT-5 chat completions expects max_completion_tokens, while some older
-    # models still use max_tokens.
+    # Modern OpenAI models use max_completion_tokens; older ones use max_tokens.
+    # Try max_completion_tokens first, fall back to max_tokens on error.
     create_kwargs = {
         "model": model_name,
         "messages": messages,
         "temperature": 0.1,
+        "max_completion_tokens": 1500,
     }
-    if model_name.lower().startswith("gpt-5"):
-        create_kwargs["max_completion_tokens"] = 1500
-    else:
-        create_kwargs["max_tokens"] = 1500
 
     try:
         try:
             resp = client.chat.completions.create(**create_kwargs)
         except Exception as e:
-            err = str(e)
-            # Retry once by swapping token parameter name if model/API expects the other one.
-            if ("max_tokens" in err and "max_completion_tokens" in err) or ("unsupported_parameter" in err):
-                if "max_completion_tokens" in create_kwargs:
-                    create_kwargs.pop("max_completion_tokens", None)
-                    create_kwargs["max_tokens"] = 1500
-                else:
-                    create_kwargs.pop("max_tokens", None)
-                    create_kwargs["max_completion_tokens"] = 1500
+            err = str(e).lower()
+            # Retry with swapped token parameter if the API rejects the current one.
+            if "max_completion_tokens" in err or "unsupported_parameter" in err:
+                create_kwargs.pop("max_completion_tokens", None)
+                create_kwargs["max_tokens"] = 1500
+                resp = client.chat.completions.create(**create_kwargs)
+            elif "max_tokens" in err:
+                create_kwargs.pop("max_tokens", None)
+                create_kwargs["max_completion_tokens"] = 1500
                 resp = client.chat.completions.create(**create_kwargs)
             else:
                 raise
