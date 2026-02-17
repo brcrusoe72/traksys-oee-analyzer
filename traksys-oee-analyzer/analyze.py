@@ -17,6 +17,14 @@ import pandas as pd
 import numpy as np
 
 from shared import EXCLUDE_REASONS, EQUIPMENT_KEYWORDS, SHIFT_HOURS, _PRODUCT_CODE_TO_PACK, classify_fault, get_target_cph
+from data_normalization import (
+    HEADER_TO_INTERNAL as _HEADER_TO_INTERNAL,
+    NUMERIC_COLUMNS as _NUMERIC_COLUMNS,
+    normalize_col as _normalize_col,
+    smart_rename as _smart_rename,
+    coerce_numerics as _coerce_numerics,
+    derive_columns as _derive_columns,
+)
 
 # ---------------------------------------------------------------------------
 # Config
@@ -89,157 +97,8 @@ def _normalize(name):
     return name.lower().strip().replace("_", "").replace(" ", "")
 
 
-# ---------------------------------------------------------------------------
-# Column Mapping Helpers — support both positional and header-based formats
-# ---------------------------------------------------------------------------
-def _normalize_col(name):
-    """Normalize a column header for fuzzy matching."""
-    return str(name).lower().strip().replace("_", "").replace(" ", "")
-
-
-# Maps normalized header names found in user uploads to internal column names.
-_HEADER_TO_INTERNAL = {
-    # Date / time columns
-    "date": "shift_date",
-    "shiftdate": "shift_date",
-    "shift": "shift",
-    "hour": "shift_hour",
-    "shifthour": "shift_hour",
-    "starttime": "time_block",
-    "timeblock": "time_block",
-    "blockstart": "block_start",
-    "blockend": "block_end",
-    # Volume / duration
-    "hours": "total_hours",
-    "durationhours": "total_hours",
-    "totalhours": "total_hours",
-    "productcode": "product_code",
-    "job": "job",
-    "goodcases": "good_cases",
-    "badcases": "bad_cases",
-    "totalcases": "total_cases",
-    "casesperhour": "cases_per_hour",
-    "cases/hr": "cases_per_hour",
-    "cph": "cases_per_hour",
-    # OEE metrics
-    "oee": "oee_pct",
-    "oeepct": "oee_pct",
-    "oee(%)": "oee_pct",
-    "avgoee": "oee_pct",
-    "availability": "availability",
-    "avgavailability": "availability",
-    "performance": "performance",
-    "avgperformance": "performance",
-    "quality": "quality",
-    # Counts
-    "intervals": "intervals",
-    "nintervals": "n_intervals",
-    "hourblocks": "hour_blocks",
-}
-
-# Columns that must be numeric
-_NUMERIC_COLUMNS = {
-    "shift_hour", "total_hours", "total_cases", "cases_per_hour",
-    "oee_pct", "availability", "performance", "quality",
-    "good_cases", "bad_cases", "intervals", "n_intervals", "hour_blocks",
-}
-
-
-def _smart_rename(df, expected_columns):
-    """Rename DataFrame columns using header-name matching, falling back to positional.
-
-    Strategy:
-      1. Normalize each header and look it up in _HEADER_TO_INTERNAL.
-      2. If enough expected columns are found by name, use name-based mapping.
-      3. Otherwise fall back to positional assignment (original behaviour).
-    """
-    header_map = {}
-    claimed = set()
-    for col in df.columns:
-        norm = _normalize_col(col)
-        if norm in _HEADER_TO_INTERNAL:
-            internal = _HEADER_TO_INTERNAL[norm]
-            if internal not in claimed:
-                header_map[col] = internal
-                claimed.add(internal)
-
-    expected_set = set(expected_columns)
-    matched = claimed & expected_set
-
-    # Use header mapping if it covers a meaningful portion of expected columns
-    if len(matched) >= max(2, len(expected_set) * 0.3):
-        return df.rename(columns=header_map)
-
-    # Fall back to positional assignment when column count matches exactly
-    if len(df.columns) == len(expected_columns):
-        df.columns = expected_columns
-        return df
-
-    # Last resort: apply whatever header matches we found
-    if header_map:
-        return df.rename(columns=header_map)
-
-    raise ValueError(
-        f"Cannot map columns: expected {len(expected_columns)} columns "
-        f"({', '.join(expected_columns[:5])}...), "
-        f"got {len(df.columns)} columns ({', '.join(str(c) for c in df.columns[:5])}...)"
-    )
-
-
-def _coerce_numerics(df):
-    """Ensure columns that should be numeric are actually numeric."""
-    for col in df.columns:
-        if col in _NUMERIC_COLUMNS:
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
-    return df
-
-
-def _derive_columns(df):
-    """Compute missing derived columns from available data."""
-    # total_cases from good_cases + bad_cases
-    if "total_cases" not in df.columns and "good_cases" in df.columns:
-        if "bad_cases" in df.columns:
-            df["total_cases"] = df["good_cases"] + df["bad_cases"]
-        else:
-            df["total_cases"] = df["good_cases"]
-
-    # cases_per_hour from total_cases / total_hours
-    if "cases_per_hour" not in df.columns:
-        if "total_cases" in df.columns and "total_hours" in df.columns:
-            mask = df["total_hours"] > 0
-            df["cases_per_hour"] = 0.0
-            df.loc[mask, "cases_per_hour"] = (
-                df.loc[mask, "total_cases"] / df.loc[mask, "total_hours"]
-            )
-        else:
-            df["cases_per_hour"] = 0.0
-
-    # oee_pct: scale from 0-1 to 0-100 if all values are <=1
-    if "oee_pct" in df.columns:
-        oee_vals = pd.to_numeric(df["oee_pct"], errors="coerce").dropna()
-        if len(oee_vals) > 0 and oee_vals.max() <= 1.0:
-            df["oee_pct"] = df["oee_pct"] * 100
-
-    # time_block: convert full datetimes to HH:MM display format
-    if "time_block" in df.columns:
-        sample = df["time_block"].dropna().head(5)
-        if len(sample) > 0:
-            first = sample.iloc[0]
-            if isinstance(first, (pd.Timestamp, datetime)):
-                df["time_block"] = df["time_block"].apply(
-                    lambda x: x.strftime("%H:%M") if isinstance(x, (pd.Timestamp, datetime)) else str(x)
-                )
-
-    # time_block: create from shift_hour if missing entirely
-    if "time_block" not in df.columns:
-        if "shift_hour" in df.columns:
-            df["time_block"] = df["shift_hour"].apply(
-                lambda h: f"{int(h)}:00" if pd.notna(h) else ""
-            )
-        else:
-            df["time_block"] = ""
-
-    return df
+# Column mapping and normalization helpers are centralized in
+# data_normalization.py and imported above.
 
 
 def _aggregate_oee(df):

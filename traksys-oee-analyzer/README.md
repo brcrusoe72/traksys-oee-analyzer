@@ -56,6 +56,8 @@ streamlit run streamlit_app.py
 
 Upload your Excel file, optionally add downtime JSON, click Analyze, download the result.
 
+The app also includes a **Standards reference** panel (line/product targets, cases per pallet, pieces per case), sourced from `standards_reference.csv`, so operations teams can use plant standards as an in-app reference.
+
 ## Input Data Format
 
 ### OEE Export (Excel)

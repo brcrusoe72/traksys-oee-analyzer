@@ -31,11 +31,16 @@ import altair as alt
 
 from analyze import load_oee_data, load_downtime_data, analyze, write_excel, _aggregate_oee
 from parse_traksys import parse_oee_period_detail, parse_event_summary, detect_file_type
-from shared import SHIFT_HOURS
+from shared import SHIFT_HOURS, load_standards_reference
 from analysis_report import read_analysis_workbook
 from oee_history import (
     _shewhart_limits, _nelson_rules, _trend_test,
     _classify_downtime, _analyze_shifts,
+)
+from operations_intelligence import (
+    score_action_items,
+    build_shift_handoff_packet,
+    detect_trend_anomalies,
 )
 
 st.set_page_config(
@@ -159,6 +164,20 @@ tab_daily, tab_trend = st.tabs(["Daily Analysis", "Trend Analysis"])
 # TAB 1: Daily Analysis (original functionality)
 # ===================================================================
 with tab_daily:
+    with st.expander("Standards reference (line/product targets)", expanded=False):
+        try:
+            standards_df = load_standards_reference()
+            st.caption("Reference table used for dropdown/default target context (8-hour shift basis).")
+            st.dataframe(standards_df, use_container_width=True, hide_index=True)
+            st.download_button(
+                "Download standards reference (.csv)",
+                standards_df.to_csv(index=False),
+                file_name="standards_reference.csv",
+                mime="text/csv",
+            )
+        except Exception as e:
+            st.warning(f"Could not load standards reference: {e}")
+
     # --- File uploads ---
     col1, col2 = st.columns(2)
 
@@ -934,6 +953,12 @@ with tab_trend:
                 else:
                     st.info("Need at least 3 reports for SPC analysis.")
 
+                anomaly_flags = detect_trend_anomalies(runs_df, dt_classes)
+                if anomaly_flags:
+                    st.markdown("### Anomaly Alerts")
+                    for flag in anomaly_flags:
+                        st.warning(flag)
+
                 st.divider()
 
                 # -------------------------------------------------------
@@ -952,6 +977,7 @@ with tab_trend:
                     pass
 
                 if smart_items:
+                    smart_items = score_action_items(smart_items)
                     # Check if database is enhancing the items
                     try:
                         from db import is_connected
@@ -961,8 +987,28 @@ with tab_trend:
                         pass
 
                     for item in smart_items:
-                        st.markdown(f"**#{item['priority']}:** {item['finding']}")
+                        score = item.get("priority_score", 0)
+                        st.markdown(f"**#{item['priority']} (score {score:.1f}):** {item['finding']}")
                         st.markdown(f"&nbsp;&nbsp;&nbsp;&nbsp;*{item['action']}*")
+
+                    if shift_trends:
+                        worst_shift = min(
+                            shift_trends.items(),
+                            key=lambda kv: kv[1].get("current_oee", 999),
+                        )[0]
+                        period_label = f"{runs_df.iloc[-1]['date_from']} to {runs_df.iloc[-1]['date_to']}"
+                        handoff_txt = build_shift_handoff_packet(
+                            worst_shift,
+                            period_label,
+                            [it.get("finding", "") for it in smart_items[:3]],
+                            smart_items[:3],
+                        )
+                        st.download_button(
+                            "Download shift handoff packet (.txt)",
+                            data=handoff_txt,
+                            file_name=f"{worst_shift.replace(' ', '_').lower()}_handoff.txt",
+                            mime="text/plain",
+                        )
                 else:
                     # Fallback: deduplicated focus items from workbooks
                     all_focus = []

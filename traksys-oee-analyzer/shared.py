@@ -6,6 +6,7 @@ equipment keywords, and related helpers used across analyze.py
 and shift_report.py.
 """
 
+import os
 import pandas as pd
 
 # ---------------------------------------------------------------------------
@@ -339,3 +340,31 @@ def classify_support(equipment_list, notes):
     if len(equip_set) >= 3:
         return "MULTIPLE"
     return ", ".join(needs) if needs else ""
+
+
+# ---------------------------------------------------------------------------
+# Standards reference table (line/product targets and packaging constants)
+# ---------------------------------------------------------------------------
+def load_standards_reference():
+    """Load standards reference used for UI/reference defaults.
+
+    Returns a DataFrame with columns:
+      line, product, target_cases_8h, cases_per_pallet, pcs_per_case
+    """
+    here = os.path.dirname(__file__)
+    fp = os.path.join(here, "standards_reference.csv")
+    if os.path.exists(fp):
+        return pd.read_csv(fp)
+
+    rows = []
+    for line, products in PLANT_TARGETS.items():
+        for product, target in products.items():
+            pallet, pcs = PALLET_AND_PIECE.get(line, {}).get(product, (None, None))
+            rows.append({
+                "line": line,
+                "product": product,
+                "target_cases_8h": target,
+                "cases_per_pallet": pallet,
+                "pcs_per_case": pcs,
+            })
+    return pd.DataFrame(rows)
