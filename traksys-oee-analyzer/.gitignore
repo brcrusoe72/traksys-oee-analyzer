@@ -18,6 +18,9 @@ history.jsonl
 nul
 desktop.ini
 
+# Secrets
+.streamlit/secrets.toml
+
 # Editor / IDE
 .vscode/
 .idea/
