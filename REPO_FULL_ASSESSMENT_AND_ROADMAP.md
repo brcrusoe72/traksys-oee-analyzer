@@ -42,7 +42,7 @@ At a high level, the repo contains:
   - PDF report generation (compact executive artifact).
 
 #### 2) Parsing/ingestion
-- `parse_traksys.py`
+- `parse_mes.py`
   - Handles raw MES “OEE Period Detail” interval-based exports.
   - Normalizes timestamps, shift naming, shift-hour rollups, and metric extraction.
 - `parse_passdown.py`

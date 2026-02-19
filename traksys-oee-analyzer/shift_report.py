@@ -92,7 +92,7 @@ def load_data(oee_path, dt_path=None, product_path=None, shift_pattern="3rd"):
                 "oee_summary": kb.get("metadata", {}).get("oee_period_summary", {}),
             }
         else:
-            from parse_traksys import detect_file_type, parse_event_summary
+            from parse_mes import detect_file_type, parse_event_summary
             dt_type = detect_file_type(dt_path)
             if dt_type == "event_summary":
                 downtime = parse_event_summary(dt_path)

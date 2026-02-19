@@ -237,7 +237,7 @@ def _correlate_dead_hours_with_events(dead_blocks, events_df, hourly):
     Returns:
         list of dead blocks enriched with 'causes' (str) and 'product' (str)
     """
-    from parse_traksys import SHIFT_STARTS
+    from parse_mes import SHIFT_STARTS
 
     if len(events_df) == 0 or len(dead_blocks) == 0:
         return dead_blocks
@@ -1062,7 +1062,7 @@ def _compute_shift_data(shift_name, hourly, shift_summary, overall, downtime,
         # Event annotation if available
         event_str = ""
         if has_events:
-            from parse_traksys import SHIFT_STARTS
+            from parse_mes import SHIFT_STARTS
             events_df_w = downtime.get("events_df")
             if events_df_w is not None and len(events_df_w) > 0:
                 shift_start = None
@@ -2435,7 +2435,7 @@ def main():
         print(f"Error: OEE file not found: {oee_file}")
         sys.exit(1)
 
-    from parse_traksys import detect_file_type, parse_oee_period_detail
+    from parse_mes import detect_file_type, parse_oee_period_detail
     oee_type = detect_file_type(oee_file)
     if oee_type == "oee_period_detail":
         print("  Detected: MES OEE Period Detail export")
@@ -2450,7 +2450,7 @@ def main():
             if downtime_file.lower().endswith(".json"):
                 downtime = load_downtime_data(downtime_file)
             else:
-                from parse_traksys import detect_file_type, parse_event_summary
+                from parse_mes import detect_file_type, parse_event_summary
                 dt_type = detect_file_type(downtime_file)
                 if dt_type == "event_summary":
                     print("  Detected: MES Event Summary export")

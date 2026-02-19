@@ -548,7 +548,7 @@ class TestParseEventSummaryContract:
 
     def test_return_dict_has_events_df(self):
         """parse_event_summary result should include events_df key."""
-        from parse_traksys import parse_event_summary
+        from parse_mes import parse_event_summary
         # We can't easily test with a real file, but verify the function
         # signature returns the right structure by testing with a minimal mock.
         # Instead, just verify the expected keys exist in the return value

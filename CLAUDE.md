@@ -59,7 +59,7 @@ Input (Excel/JSON/Photos/Passdowns)
 
 - **`analyze.py`** — Main OEE pipeline: fuzzy sheet/column matching, weighted KPIs, downtime narratives, and workbook generation.
 - **`shared.py`** — Canonical domain constants and logic: fault keywords, product normalization, rated speeds, and helper utilities.
-- **`parse_traksys.py`** — MES export parsing and format detection.
+- **`parse_mes.py`** — MES export parsing and format detection.
 - **`parse_passdown.py`** — Shift passdown parsing into analyzable downtime/event records.
 - **`data_normalization.py`** — Header/value normalization and canonical field preparation.
 - **`ingest_router.py`** — Routes incoming files to parser/normalization pathways.
