@@ -621,6 +621,30 @@ def _load_single_sheet_oee(filepath):
             if "shift_date" not in hourly.columns:
                 hourly["shift_date"] = parsed_tb.dt.date.astype(str)
 
+    # If date/hour are still missing, try to infer from any datetime-like column.
+    if "shift_date" not in hourly.columns or "shift_hour" not in hourly.columns:
+        for col in hourly.columns:
+            parsed = pd.to_datetime(hourly[col], errors="coerce")
+            if parsed.notna().sum() < 1:
+                continue
+            if "shift_date" not in hourly.columns:
+                hourly["shift_date"] = parsed.dt.date.astype(str)
+            if "shift_hour" not in hourly.columns:
+                hourly["shift_hour"] = parsed.dt.hour + 1
+            if "time_block" not in hourly.columns:
+                hourly["time_block"] = parsed.dt.strftime("%H:%M")
+            break
+
+    # If hour is present under an unmapped column name, recover it.
+    if "shift_hour" not in hourly.columns:
+        for col in hourly.columns:
+            ncol = _normalize_col(col)
+            if ncol in {"hour", "hr", "starthour", "hourofday"}:
+                cand = pd.to_numeric(hourly[col], errors="coerce")
+                if cand.notna().any():
+                    hourly["shift_hour"] = cand
+                    break
+
     if "shift" not in hourly.columns and "shift_hour" in hourly.columns:
         hourly["shift"] = hourly["shift_hour"].apply(_shift_from_hour)
 

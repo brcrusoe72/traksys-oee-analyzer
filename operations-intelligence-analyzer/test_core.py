@@ -356,6 +356,29 @@ class TestSingleSheetFallback:
         assert len(overall) == 1
         assert len(hour_avg) == 1
 
+    def test_load_oee_data_single_sheet_infer_shift_from_timestamp(self, tmp_path):
+        path = tmp_path / "single_data_ts_only.xlsx"
+        df = pd.DataFrame(
+            [
+                {
+                    "Timestamp": "2026-02-18 07:15:00",
+                    "Duration": 1.0,
+                    "Total": 1020,
+                    "Good": 1000,
+                    "Bad": 20,
+                    "OEE %": 75.0,
+                }
+            ]
+        )
+        with pd.ExcelWriter(path, engine="xlsxwriter") as writer:
+            df.to_excel(writer, sheet_name="Data", index=False)
+
+        hourly, shift_summary, overall, hour_avg = load_oee_data(str(path))
+        assert len(hourly) == 1
+        assert hourly.iloc[0]["shift"] == "1st Shift"
+        assert "shift_date" in hourly.columns
+        assert "shift_hour" in hourly.columns
+
 
 # =====================================================================
 # _weighted_mean — helper for production-weighted averages

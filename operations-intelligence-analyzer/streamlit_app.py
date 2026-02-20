@@ -589,7 +589,8 @@ with tab_daily:
 
                 except ValueError as e:
                     err_msg = str(e)
-                    if "worksheet" in err_msg.lower() or "sheet" in err_msg.lower():
+                    low = err_msg.lower()
+                    if "could not find matching worksheet" in low or "expected sheets:" in low:
                         st.error("**Sheet mismatch** — your Excel file doesn't have the expected sheet names.")
                         st.info(
                             "The analyzer expects these sheets in your OEE export:\n\n"
@@ -602,6 +603,15 @@ with tab_daily:
                             "**Fix options:**\n"
                             "1. Rename your sheets to match the names above\n"
                             "2. Check that you're uploading the correct OEE export file"
+                        )
+                        st.code(err_msg, language=None)
+                    elif "one-sheet oee file is missing required columns" in low:
+                        st.error("**Single-sheet format detected, but required fields are still missing.**")
+                        st.info(
+                            "The app can infer many one-sheet layouts, but it still needs enough date/time and "
+                            "production fields to reconstruct shifts.\n\n"
+                            "Required core fields (directly or inferable): `shift_date`, `shift` or `shift_hour`, "
+                            "`total_cases`, `total_hours`, and `oee_pct`."
                         )
                         st.code(err_msg, language=None)
                     else:
