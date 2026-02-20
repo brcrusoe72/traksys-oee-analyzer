@@ -1,5 +1,1 @@
-<<<<<<< HEAD
--r mes-oee-analyzer/requirements.txt
-=======
 -r operations-intelligence-analyzer/requirements.txt
->>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
