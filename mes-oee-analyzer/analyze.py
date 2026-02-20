@@ -1,7 +1,7 @@
 """
-Traksys OEE + Downtime Analyzer
+MES OEE + Downtime Analyzer
 ================================
-Reads Traksys OEE exports AND downtime event data to generate a
+Reads MES OEE exports AND downtime event data to generate a
 complete analysis with shift-level deep dives and fault classification.
 
 Usage:
@@ -237,7 +237,7 @@ def _correlate_dead_hours_with_events(dead_blocks, events_df, hourly):
     Returns:
         list of dead blocks enriched with 'causes' (str) and 'product' (str)
     """
-    from parse_traksys import SHIFT_STARTS
+    from parse_mes import SHIFT_STARTS
 
     if len(events_df) == 0 or len(dead_blocks) == 0:
         return dead_blocks
@@ -1062,7 +1062,7 @@ def _compute_shift_data(shift_name, hourly, shift_summary, overall, downtime,
         # Event annotation if available
         event_str = ""
         if has_events:
-            from parse_traksys import SHIFT_STARTS
+            from parse_mes import SHIFT_STARTS
             events_df_w = downtime.get("events_df")
             if events_df_w is not None and len(events_df_w) > 0:
                 shift_start = None
@@ -1868,7 +1868,7 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None,
                 f"{worst_name}'s top issue is {worst_top_cause[0]} — does {best_name} see the same equipment? "
                 f"If not, it's a shift-specific problem."
                 if worst_top_cause else
-                f"No downtime data for {worst_name} — pull Traksys event logs manually for that shift.")
+                f"No downtime data for {worst_name} — pull MES event logs manually for that shift.")
 
             recs.append({
                 "Priority": priority,
@@ -1970,7 +1970,7 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None,
                         "; ".join(detail_parts) + ". "
                         f"These {total_uncoded_min:.0f} minutes could be hiding the real #1 cause. "
                         f"{best_uncoded[0]} has the best coding rate ({best_uncoded[1]['pct']:.0f}% uncoded)."),
-                    "Step 1": f"Review Traksys reason code tree with {worst_uncoded[0]} leads. Are codes confusing or missing common causes?",
+                    "Step 1": f"Review MES reason code tree with {worst_uncoded[0]} leads. Are codes confusing or missing common causes?",
                     "Step 2": "Simplify: 15-20 actionable codes. Merge duplicates, drop obsolete.",
                     "Step 3": f"Coach {worst_uncoded[0]} supervisors: 'If you can't code it, write a note. No blanks.'",
                     "Step 4": "Weekly audit: pull uncoded events by shift. Review with shift leads. Code retroactively.",
@@ -1992,7 +1992,7 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None,
             "Finding": "Shift comparison (no event data available for equipment-level breakdown)",
             "The Work": ". ".join(comparison_parts) + ". Upload downtime event data to see equipment-level Pareto by shift.",
             "Step 1": "The shift deep-dive tabs show OEE, cases, dead hours per shift — compare those.",
-            "Step 2": "To get equipment-level action items, export Traksys downtime events and include with the OEE data.",
+            "Step 2": "To get equipment-level action items, export MES downtime events and include with the OEE data.",
             "Step 3": "Focus on the shift with the most dead hours — that's the biggest opportunity without event data.",
             "Step 4": "Talk to operators on each shift about what stops the line. Their input fills the data gap.",
             "Step 5": "Once event data is available, re-run for equipment Pareto by shift.",
@@ -2031,7 +2031,7 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None,
                 "Finding": f"Context photos flagged {len(photo_issues)} issue(s)",
                 "The Work": (
                     f"Photo-extracted findings: {issues_text}.{notes_text} "
-                    f"Cross-reference with machine data above — same events or additional issues not in Traksys?"
+                    f"Cross-reference with machine data above — same events or additional issues not in MES?"
                 ),
                 "Step 1": "Do these match machine-data downtime causes? If yes: confirms accuracy.",
                 "Step 2": "If new issues: add to downtime tracking so they appear in future Pareto.",
@@ -2435,10 +2435,10 @@ def main():
         print(f"Error: OEE file not found: {oee_file}")
         sys.exit(1)
 
-    from parse_traksys import detect_file_type, parse_oee_period_detail
+    from parse_mes import detect_file_type, parse_oee_period_detail
     oee_type = detect_file_type(oee_file)
     if oee_type == "oee_period_detail":
-        print("  Detected: Traksys OEE Period Detail export")
+        print("  Detected: MES OEE Period Detail export")
         hourly, shift_summary, overall, hour_avg = parse_oee_period_detail(oee_file)
     else:
         hourly, shift_summary, overall, hour_avg = load_oee_data(oee_file)
@@ -2450,10 +2450,10 @@ def main():
             if downtime_file.lower().endswith(".json"):
                 downtime = load_downtime_data(downtime_file)
             else:
-                from parse_traksys import detect_file_type, parse_event_summary
+                from parse_mes import detect_file_type, parse_event_summary
                 dt_type = detect_file_type(downtime_file)
                 if dt_type == "event_summary":
-                    print("  Detected: Traksys Event Summary export")
+                    print("  Detected: MES Event Summary export")
                     downtime = parse_event_summary(downtime_file)
                 elif dt_type == "passdown":
                     from parse_passdown import parse_passdown

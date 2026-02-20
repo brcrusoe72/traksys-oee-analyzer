@@ -1,1 +1,1 @@
--r traksys-oee-analyzer/requirements.txt
+-r mes-oee-analyzer/requirements.txt

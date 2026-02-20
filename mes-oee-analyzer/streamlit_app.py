@@ -4,7 +4,7 @@ Operations Intelligence Analyzer - Web Interface
 Upload production data exports and get back formatted analysis outputs.
 
 Supports both:
-  - Structured OEE exports (TrakSYS and similar MES formats)
+  - Structured OEE exports (MES and similar MES formats)
   - Pre-processed OEE workbooks (DayShiftHour format)
 
 Tabs:
@@ -33,7 +33,7 @@ from analyze import analyze, write_excel, _aggregate_oee
 from shared import SHIFT_HOURS, load_standards_reference
 from analysis_report import read_analysis_workbook
 from canonical_schema import validate_and_coerce_ingest_frames
-from ingest_router import ingest_uploaded_inputs
+from ingest_router import ingest_uploaded_inputs, _safe_upload_name
 from oee_history import (
     _shewhart_limits, _nelson_rules, _trend_test,
     _classify_downtime, _analyze_shifts,
@@ -53,6 +53,28 @@ st.set_page_config(
 
 st.title("Operations Intelligence Analyzer")
 st.markdown("Upload production data. Get back Excel, PDF, or both with loss breakdowns and prioritized actions.")
+
+_MAX_UPLOAD_MB = 25
+_DEBUG_ERRORS = os.environ.get("OIA_DEBUG_ERRORS", "0") == "1"
+
+
+def _reject_oversize(files, label: str):
+    """Warn and filter uploads larger than _MAX_UPLOAD_MB."""
+    accepted = []
+    for f in files or []:
+        size = getattr(f, "size", None)
+        if size is not None and size > _MAX_UPLOAD_MB * 1024 * 1024:
+            st.warning(f"{label}: skipped `{f.name}` (>{_MAX_UPLOAD_MB} MB limit).")
+        else:
+            accepted.append(f)
+    return accepted
+
+
+def _report_error(prefix: str, err: Exception):
+    """Show safe user-facing errors; detailed trace only in debug mode."""
+    st.error(f"{prefix}: {err}" if _DEBUG_ERRORS else f"{prefix}. Check input format and try again.")
+    if _DEBUG_ERRORS:
+        st.exception(err)
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +261,10 @@ with tab_daily:
         st.warning("Maximum 6 context files. Only the first 6 will be used.")
         context_files = context_files[:6]
 
+    oee_files = _reject_oversize(oee_files, "OEE upload")
+    downtime_files = _reject_oversize(downtime_files, "Downtime upload")
+    context_files = _reject_oversize(context_files, "Context upload")
+
     output_format = st.radio(
         "Output format",
         options=["Excel (.xlsx)", "PDF Report (.pdf)", "Both"],
@@ -389,7 +415,7 @@ with tab_daily:
                         line_downtime = _merge_downtime_dicts(line_dt_list) if line_dt_list else None
 
                         # Build output filename
-                        basename = os.path.splitext(oee_files[0].name)[0]
+                        basename = os.path.splitext(_safe_upload_name(oee_files[0].name))[0]
                         if len(oee_files) > 1:
                             basename += f"_+{len(oee_files) - 1}"
                         suffix = "_FULL_ANALYSIS" if line_downtime else "_ANALYSIS"
@@ -583,11 +609,9 @@ with tab_daily:
                         )
                         st.code(err_msg, language=None)
                     else:
-                        st.error(f"Analysis failed: {e}")
-                        st.exception(e)
+                        _report_error("Analysis failed", e)
                 except Exception as e:
-                    st.error(f"Analysis failed: {e}")
-                    st.exception(e)
+                    _report_error("Analysis failed", e)
                 finally:
                     shutil.rmtree(tmp_dir, ignore_errors=True)
     else:
@@ -618,14 +642,15 @@ with tab_trend:
         trend_tmp = tempfile.mkdtemp()
         try:
             for tf in trend_files:
-                tf_path = os.path.join(trend_tmp, tf.name)
+                safe_tf_name = _safe_upload_name(tf.name)
+                tf_path = os.path.join(trend_tmp, safe_tf_name)
                 with open(tf_path, "wb") as f:
                     f.write(tf.getbuffer())
                 try:
                     wb = read_analysis_workbook(tf_path)
                     workbooks.append(wb)
                 except Exception as e:
-                    st.warning(f"Could not parse {tf.name}: {e}")
+                    st.warning(f"Could not parse {safe_tf_name}: {e}")
 
             if len(workbooks) < 2:
                 st.warning("Need at least 2 valid workbooks for trend analysis.")
@@ -1069,8 +1094,7 @@ with tab_trend:
                         st.info("No action items found in uploaded workbooks.")
 
         except Exception as e:
-            st.error(f"Trend analysis failed: {e}")
-            st.exception(e)
+            _report_error("Trend analysis failed", e)
         finally:
             shutil.rmtree(trend_tmp, ignore_errors=True)
 

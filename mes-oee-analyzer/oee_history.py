@@ -1,5 +1,5 @@
 """
-History + SPC Engine for Traksys OEE Analyzer
+History + SPC Engine for MES OEE Analyzer
 ==============================================
 Two-layer architecture:
   1. history.jsonl   — append-only raw log (receipt of every run)

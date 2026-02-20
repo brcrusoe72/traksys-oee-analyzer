@@ -1,11 +1,11 @@
-# Traksys OEE Analyzer — Full Repository Assessment and Next-Build Plan
+# MES OEE Analyzer — Full Repository Assessment and Next-Build Plan
 
 ## Pull/Sync Status
 - Attempted to `git pull --ff-only`, but this checkout has no configured remote/tracking branch, so the repository cannot be pulled/synced automatically in its current state.
 - Current branch: `work`.
 
 ## What this repository is
-This project is a **production-focused manufacturing analytics toolkit** that ingests Traksys/MES exports and generates:
+This project is a **production-focused manufacturing analytics toolkit** that ingests MES/MES exports and generates:
 - Multi-sheet Excel analysis workbooks,
 - Shift deep-dive reports,
 - Optional PDF reports,
@@ -15,7 +15,7 @@ This project is a **production-focused manufacturing analytics toolkit** that in
 
 At a high level, the repo contains:
 1. A Python analysis engine (`analyze.py`) for OEE + downtime decomposition,
-2. Data ingestion/parsing modules for raw Traksys and shift passdown files,
+2. Data ingestion/parsing modules for raw MES and shift passdown files,
 3. A Streamlit UI for file upload and report generation,
 4. A historical trend engine (`oee_history.py`) for control limits and run intelligence,
 5. A database adapter (`db.py`) plus SQL schema for Supabase-backed persistence,
@@ -24,12 +24,12 @@ At a high level, the repo contains:
 ## Repository layout and responsibilities
 
 ### Root-level structure
-- `streamlit_app.py` (root): thin launcher that imports and executes app code from `traksys-oee-analyzer/streamlit_app.py` so Streamlit Cloud can run from repo root.
+- `streamlit_app.py` (root): thin launcher that imports and executes app code from `mes-oee-analyzer/streamlit_app.py` so Streamlit Cloud can run from repo root.
 - `requirements.txt` (root): app dependencies for deployment.
 - `CLAUDE.md`: architecture and command reference for contributors.
-- `traksys-oee-analyzer/`: primary source folder.
+- `mes-oee-analyzer/`: primary source folder.
 
-### Core package folder: `traksys-oee-analyzer/`
+### Core package folder: `mes-oee-analyzer/`
 
 #### 1) Analysis engine and reporting
 - `analyze.py`
@@ -42,8 +42,8 @@ At a high level, the repo contains:
   - PDF report generation (compact executive artifact).
 
 #### 2) Parsing/ingestion
-- `parse_traksys.py`
-  - Handles raw Traksys “OEE Period Detail” interval-based exports.
+- `parse_mes.py`
+  - Handles raw MES “OEE Period Detail” interval-based exports.
   - Normalizes timestamps, shift naming, shift-hour rollups, and metric extraction.
 - `parse_passdown.py`
   - Parses operator passdown spreadsheets and maps them into downtime/event structures compatible with analysis.

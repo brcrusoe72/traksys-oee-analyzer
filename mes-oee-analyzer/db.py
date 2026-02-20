@@ -1,5 +1,5 @@
 """
-Supabase Database Layer for Traksys OEE Analyzer
+Supabase Database Layer for MES OEE Analyzer
 =================================================
 Equipment knowledge, downtime baselines, and persistent run history.
 

@@ -1,5 +1,5 @@
 """
-Parser for raw Traksys OEE exports.
+Parser for raw MES OEE exports.
 Converts 'OEE Period Detail' and 'Event Summary (Date)' exports
 into the DataFrame format expected by analyze.py.
 
@@ -64,7 +64,7 @@ def _safe_float(val, default=0.0):
 
 
 def _parse_timestamp(ts):
-    """Parse Traksys timestamp to Python datetime.
+    """Parse MES timestamp to Python datetime.
     Handles double-space formatting like 'Feb  6 2026  6:55AM'.
     """
     if isinstance(ts, datetime):
@@ -154,7 +154,7 @@ def _time_block(ts):
 # ---------------------------------------------------------------------------
 def parse_oee_period_detail(filepath):
     """
-    Parse a Traksys 'OEE Period Detail' export.
+    Parse a MES 'OEE Period Detail' export.
 
     Sheet2 has variable-length intervals (13-row blocks).
     We aggregate sub-hourly intervals into hourly buckets to match
@@ -375,7 +375,7 @@ def _aggregate_hour(group):
 # ---------------------------------------------------------------------------
 def parse_event_summary(filepath):
     """
-    Parse a Traksys 'Event Summary (Date)' export.
+    Parse a MES 'Event Summary (Date)' export.
 
     Hierarchical structure:
       Row 6: Line total (Col B = "Line 2 - Flex")
@@ -514,8 +514,8 @@ def detect_file_type(filepath):
     """
     Detect file format:
       'old_oee'            — processed workbook with DayShiftHour sheets
-      'oee_period_detail'  — raw Traksys OEE Period Detail export
-      'event_summary'      — raw Traksys Event Summary (Date) export
+      'oee_period_detail'  — raw MES OEE Period Detail export
+      'event_summary'      — raw MES Event Summary (Date) export
       'passdown'           — shift passdown spreadsheet (operator notes)
       'unknown'
     """

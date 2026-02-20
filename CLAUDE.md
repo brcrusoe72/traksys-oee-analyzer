@@ -4,9 +4,9 @@ This file captures the **current state of the repository** so coding agents can 
 
 ## Project Overview
 
-**Operations Intelligence Analyzer** is a production-focused OEE analysis suite for manufacturing operations. It ingests MES exports (including TrakSYS-style exports), classifies downtime causes, computes production-weighted KPIs, and emits Excel/PDF/web outputs.
+**Operations Intelligence Analyzer** is a production-focused OEE analysis suite for manufacturing operations. It ingests MES exports (including MES-style exports), classifies downtime causes, computes production-weighted KPIs, and emits Excel/PDF/web outputs.
 
-Primary implementation lives in `traksys-oee-analyzer/` (repository path retained for compatibility), with a thin root-level `streamlit_app.py` launcher.
+Primary implementation lives in `mes-oee-analyzer/` (repository path retained for compatibility), with a thin root-level `streamlit_app.py` launcher.
 
 ## Current Core Assumptions (verified)
 
@@ -21,27 +21,27 @@ Primary implementation lives in `traksys-oee-analyzer/` (repository path retaine
 5. **Persistence is optional and mixed-mode.**
    - Local file artifacts (`history.jsonl` / trend JSON) are still expected, while `db.py` supports optional Supabase-backed persistence.
 6. **Streamlit entrypoint exists in two places for convenience.**
-   - Root `streamlit_app.py` forwards into package app code in `traksys-oee-analyzer/streamlit_app.py`.
+   - Root `streamlit_app.py` forwards into package app code in `mes-oee-analyzer/streamlit_app.py`.
 7. **Branding was generalized, but paths remain stable.**
-   - User-facing naming is now "Operations Intelligence Analyzer" while historical `traksys-*` file/repo names remain in place.
+   - User-facing naming is now "Operations Intelligence Analyzer" while historical `mes-*` file/repo names remain in place.
 
 ## Commands
 
 ```bash
 # Install dependencies
-pip install -r traksys-oee-analyzer/requirements.txt
+pip install -r mes-oee-analyzer/requirements.txt
 
 # Run all tests
-python -m pytest traksys-oee-analyzer/ -v
+python -m pytest mes-oee-analyzer/ -v
 
 # Run a focused suite
-python -m pytest traksys-oee-analyzer/test_core.py -v
+python -m pytest mes-oee-analyzer/test_core.py -v
 
 # Run Streamlit UI (root launcher)
 streamlit run streamlit_app.py
 
 # CLI analysis
-python traksys-oee-analyzer/analyze.py <oee_export.xlsx> [--downtime kb.json]
+python mes-oee-analyzer/analyze.py <oee_export.xlsx> [--downtime kb.json]
 ```
 
 No linter/formatter is enforced in this repository.
@@ -59,7 +59,7 @@ Input (Excel/JSON/Photos/Passdowns)
 
 - **`analyze.py`** — Main OEE pipeline: fuzzy sheet/column matching, weighted KPIs, downtime narratives, and workbook generation.
 - **`shared.py`** — Canonical domain constants and logic: fault keywords, product normalization, rated speeds, and helper utilities.
-- **`parse_traksys.py`** — TrakSYS export parsing and format detection.
+- **`parse_mes.py`** — MES export parsing and format detection.
 - **`parse_passdown.py`** — Shift passdown parsing into analyzable downtime/event records.
 - **`data_normalization.py`** — Header/value normalization and canonical field preparation.
 - **`ingest_router.py`** — Routes incoming files to parser/normalization pathways.

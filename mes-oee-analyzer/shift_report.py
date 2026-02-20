@@ -92,7 +92,7 @@ def load_data(oee_path, dt_path=None, product_path=None, shift_pattern="3rd"):
                 "oee_summary": kb.get("metadata", {}).get("oee_period_summary", {}),
             }
         else:
-            from parse_traksys import detect_file_type, parse_event_summary
+            from parse_mes import detect_file_type, parse_event_summary
             dt_type = detect_file_type(dt_path)
             if dt_type == "event_summary":
                 downtime = parse_event_summary(dt_path)
@@ -133,7 +133,7 @@ def load_data(oee_path, dt_path=None, product_path=None, shift_pattern="3rd"):
 
 
 def load_downtime_pareto(downtime_path):
-    """Load Traksys machine data for target tracking sheets."""
+    """Load MES machine data for target tracking sheets."""
     if not downtime_path or not os.path.exists(downtime_path):
         return None, None, None
     with open(downtime_path, "r", encoding="utf-8") as f:
@@ -340,7 +340,7 @@ def build_data_says(daily, runs, shift_label, reason_codes=None, pareto=None, oe
     riverwood_min = 0
     riverwood_events = 0
     if reason_codes:
-        _ds_section(rows, "THE MACHINE SAYS — TRAKSYS DATA, LINE 2")
+        _ds_section(rows, "THE MACHINE SAYS — MES DATA, LINE 2")
         if oee_summary:
             avail = oee_summary.get("availability", 0) * 100
             perf = oee_summary.get("performance", 0) * 100
@@ -355,7 +355,7 @@ def build_data_says(daily, runs, shift_label, reason_codes=None, pareto=None, oe
         _ds_blank(rows)
 
         _ds_section(rows, "DOWNTIME PARETO — WHERE THE TIME GOES")
-        _ds_row(rows, "Source: Traksys event data. This is what the machine recorded.")
+        _ds_row(rows, "Source: MES event data. This is what the machine recorded.")
         _ds_blank(rows)
 
         kayat_tray_min = kayat_shrink_min = kayat_wrap_min = 0
@@ -415,7 +415,7 @@ def build_data_says(daily, runs, shift_label, reason_codes=None, pareto=None, oe
         _ds_blank(rows)
     else:
         _ds_section(rows, "TOP EQUIPMENT ISSUES — FROM OPERATOR NOTES")
-        _ds_row(rows, "(Traksys downtime file not provided — using shift report notes)")
+        _ds_row(rows, "(MES downtime file not provided — using shift report notes)")
         _ds_blank(rows)
         equip_counts = Counter()
         for _, r in runs.dropna(subset=["notes"]).iterrows():
@@ -528,7 +528,7 @@ def build_sendable(daily, runs, shift_label, reason_codes=None, oee_summary=None
     lines.append("")
 
     if reason_codes:
-        lines.append("Top downtime (Traksys machine data):")
+        lines.append("Top downtime (MES machine data):")
         rw_min = 0
         for rc in reason_codes:
             if rc["reason"] == "Caser - Riverwood":
@@ -1091,7 +1091,7 @@ def build_report(hourly, shift_summary, overall, hour_avg, downtime, product_dat
             p += 1
 
     target_oee = min(st_oee + 5, sb_oee) if benchmark_shift else st_oee + 5
-    actions.append({"Priority": p, "Area": "Measurement & Follow-Up", "Problem": f"Current {shift_label} shift OEE: {st_oee:.1f}% — Target: {target_oee:.1f}%", "Step 1": "Pick top 2 actions. Focus beats breadth.", "Step 2": "Assign one owner per action.", "Step 3": "Review weekly with Traksys data.", "Step 4": "Re-run analysis in 4 weeks.", "Step 5": f"5 OEE points = ~{5*st_hours/max(n_days,1)/100*st_cph:,.0f} cases/night."})
+    actions.append({"Priority": p, "Area": "Measurement & Follow-Up", "Problem": f"Current {shift_label} shift OEE: {st_oee:.1f}% — Target: {target_oee:.1f}%", "Step 1": "Pick top 2 actions. Focus beats breadth.", "Step 2": "Assign one owner per action.", "Step 3": "Review weekly with MES data.", "Step 4": "Re-run analysis in 4 weeks.", "Step 5": f"5 OEE points = ~{5*st_hours/max(n_days,1)/100*st_cph:,.0f} cases/night."})
     sheets["Recommended Actions"] = pd.DataFrame(actions)
 
     return sheets
@@ -1269,7 +1269,7 @@ def write_report(sheets, output_path, shift_label="3rd"):
                 ws.set_column(0, 0, 30)
                 ws.set_column(1, 1, 100)
                 ws.hide_gridlines(2)
-                section_labels = {"BOTTOM LINE", "THE MACHINE SAYS — TRAKSYS DATA, LINE 2", "DOWNTIME PARETO — WHERE THE TIME GOES", "CREW CAPABILITY — SAME PRODUCT, DIFFERENT RESULTS", "WHO DOES WHAT — DEFINE IT", "FIX THESE 3 THINGS", "TARGET", "TOP EQUIPMENT ISSUES — FROM OPERATOR NOTES"}
+                section_labels = {"BOTTOM LINE", "THE MACHINE SAYS — MES DATA, LINE 2", "DOWNTIME PARETO — WHERE THE TIME GOES", "CREW CAPABILITY — SAME PRODUCT, DIFFERENT RESULTS", "WHO DOES WHAT — DEFINE IT", "FIX THESE 3 THINGS", "TARGET", "TOP EQUIPMENT ISSUES — FROM OPERATOR NOTES"}
                 for row_num in range(len(df)):
                     val = str(df.iloc[row_num].get("Section", ""))
                     detail = str(df.iloc[row_num].get("Detail", ""))

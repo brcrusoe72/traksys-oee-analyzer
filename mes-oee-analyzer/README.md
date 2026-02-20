@@ -81,7 +81,7 @@ Your OEE export should include these sheets:
 - **CI Engineers** who never have time to build the Pareto
 - **Plant Managers** who want numbers from the machine, not opinions
 - **Supervisors** who need shift-level accountability data
-- **Anyone** running TrakSYS, Vorne, or similar MES systems with OEE exports
+- **Anyone** running MES, Vorne, or similar MES systems with OEE exports
 
 ## The Philosophy
 

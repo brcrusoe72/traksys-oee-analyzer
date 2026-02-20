@@ -4,7 +4,7 @@
 
 Built by a manufacturing engineer who got tired of spreadsheet hell.
 
-### [🚀 Live Demo](https://traksys-oee-analyzer-esh6dt3bptdjg83ubda4wb.streamlit.app/)
+### [🚀 Live Demo](https://operations-intelligence-analyzer.streamlit.app/)
 
 ---
 
@@ -51,7 +51,7 @@ The analyzer handles raw MES data — not just tidy spreadsheets:
 
 | Format | Example | What It Contains |
 |--------|---------|-----------------|
-| **OEE Period Detail** | 69-column Traksys export, 3000+ hourly rows | OEE, MTBF/MTTR, TEEP, availability loss seconds, production units |
+| **OEE Period Detail** | 69-column MES export, 3000+ hourly rows | OEE, MTBF/MTTR, TEEP, availability loss seconds, production units |
 | **Event Overview** | 21-column event log, 50K-70K+ records | Every downtime event with fault codes, durations, equipment IDs |
 | **Pre-processed workbook** | DayShiftHour format | Cleaned hourly OEE by shift |
 | **Shift passdown** | Operator handoff notes | Area/Issue/Time/Notes from the floor |
@@ -66,9 +66,9 @@ Don't worry about exact column names. The analyzer maps 50+ header variants with
 ### Install
 
 ```bash
-git clone https://github.com/brcrusoe72/traksys-oee-analyzer.git
-cd traksys-oee-analyzer
-pip install -r traksys-oee-analyzer/requirements.txt
+git clone https://github.com/brcrusoe72/operations-intelligence-analyzer.git
+cd operations-intelligence-analyzer
+pip install -r requirements.txt
 ```
 
 ### Run the Web App
@@ -83,10 +83,10 @@ Then open [http://localhost:8501](http://localhost:8501) and upload your data.
 
 ```bash
 # Full OEE analysis → Excel workbook
-python traksys-oee-analyzer/analyze.py your_export.xlsx
+python <package_dir>/analyze.py your_export.xlsx
 
 # With downtime context
-python traksys-oee-analyzer/analyze.py your_export.xlsx --downtime kb.json
+python <package_dir>/analyze.py your_export.xlsx --downtime kb.json
 ```
 
 ## Architecture
@@ -107,7 +107,7 @@ Raw MES Data → Parsing/Normalization → Analysis Engine → Learning Memory �
 | `shift_report.py` | 1,400 | 13-sheet shift deep dive — hourly patterns, product granularity, day-of-week breakdowns |
 | `oee_history.py` | 1,150 | Append-only JSONL history + SPC trend engine with Nelson Rules |
 | `analysis_report.py` | 925 | PDF executive report builder |
-| `parse_traksys.py` | 550 | Raw Traksys export parser with format auto-detection |
+| `MES parser module` | 550 | Raw MES export parser with format auto-detection |
 | `photo_analysis.py` | 510 | AI vision pipeline — photos → equipment issues → downtime dictionaries |
 | `parse_passdown.py` | 310 | Operator passdown parser with auto-format detection |
 | `shared.py` | 370 | Domain constants — fault keywords, product normalization, rated speeds |
@@ -119,7 +119,7 @@ Raw MES Data → Parsing/Normalization → Analysis Engine → Learning Memory �
 
 **Production-weighted metrics** — OEE is always weighted by production hours. A 15-minute interval with 20% OEE doesn't tank an 8-hour shift average.
 
-**Fuzzy matching everywhere** — Headers vary across Traksys versions, plant configs, and export settings. The analyzer handles it with 50+ mappings and positional fallback.
+**Fuzzy matching everywhere** — Headers vary across MES versions, plant configs, and export settings. The analyzer handles it with 50+ mappings and positional fallback.
 
 **Classification hierarchy** — `Unassigned → Scheduled → Micro Stops → Process → Equipment → Fallback → Unclassified`. More specific categories take priority.
 
@@ -134,7 +134,7 @@ Python · pandas · NumPy · openpyxl · xlsxwriter · fpdf2 · Streamlit · Alt
 ## Tests
 
 ```bash
-python -m pytest traksys-oee-analyzer/ -v
+python -m pytest -v
 ```
 
 Covers core OEE math, fault classification, parser behaviors, report assembly, shift deep dives, SPC/trend structures, and photo analysis transforms.

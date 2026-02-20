@@ -1,4 +1,4 @@
--- Traksys OEE Analyzer — Supabase Schema
+-- MES OEE Analyzer — Supabase Schema
 -- ========================================
 -- Run this in the Supabase SQL Editor (Dashboard > SQL Editor > New Query)
 --

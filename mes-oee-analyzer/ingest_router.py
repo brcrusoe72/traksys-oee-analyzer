@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
 
 from analyze import load_downtime_data, load_oee_data
-from parse_traksys import detect_file_type, parse_event_summary, parse_oee_period_detail
+from parse_mes import detect_file_type, parse_event_summary, parse_oee_period_detail
 
 
 @dataclass
@@ -30,6 +31,17 @@ class IngestMeta:
         }
 
 
+
+
+def _safe_upload_name(filename: str) -> str:
+    """Normalize user-provided upload names to a safe basename."""
+    name = str(filename or "upload")
+    name = name.replace("\\", "/").split("/")[-1]
+    name = name.replace("\x00", "")
+    name = re.sub(r"[^A-Za-z0-9._-]", "_", name).strip("._")
+    return name or "upload"
+
+
 @dataclass
 class IngestBundle:
     hourly: pd.DataFrame
@@ -40,7 +52,8 @@ class IngestBundle:
 
 
 def _write_uploaded_file(uploaded_file, tmp_dir: str) -> str:
-    path = os.path.join(tmp_dir, uploaded_file.name)
+    safe_name = _safe_upload_name(uploaded_file.name)
+    path = os.path.join(tmp_dir, safe_name)
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
     return path
@@ -66,7 +79,7 @@ def ingest_uploaded_inputs(oee_files, downtime_files, context_files, tmp_dir: st
             info_messages.append(f"Detected: {oee_file.name} - OEE Period Detail")
             h, ss, _ov, _ha = parse_oee_period_detail(oee_path)
             detected_sources.add("oee_period_detail")
-            parser_chain.append("parse_traksys.parse_oee_period_detail")
+            parser_chain.append("parse_mes.parse_oee_period_detail")
         else:
             h, ss, _ov, _ha = load_oee_data(oee_path)
             detected_sources.add("oee_workbook")
@@ -107,7 +120,7 @@ def ingest_uploaded_inputs(oee_files, downtime_files, context_files, tmp_dir: st
                     info_messages.append(f"Detected: {dt_file.name} - Event Summary ({line_key})")
                     dt_by_line.setdefault(line_key, []).append(dt_data)
                     detected_sources.add("event_summary")
-                    parser_chain.append("parse_traksys.parse_event_summary")
+                    parser_chain.append("parse_mes.parse_event_summary")
                 elif dt_type == "passdown":
                     from parse_passdown import parse_passdown
 
