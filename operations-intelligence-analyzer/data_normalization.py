@@ -52,6 +52,25 @@ NUMERIC_COLUMNS = {
 }
 
 
+def _collapse_duplicate_columns(df):
+    """Merge duplicate-named columns by taking the first non-null value per row."""
+    if not df.columns.duplicated().any():
+        return df
+
+    out = pd.DataFrame(index=df.index)
+    seen = set()
+    for col in df.columns:
+        if col in seen:
+            continue
+        seen.add(col)
+        data = df.loc[:, df.columns == col]
+        if isinstance(data, pd.DataFrame) and data.shape[1] > 1:
+            out[col] = data.bfill(axis=1).iloc[:, 0]
+        else:
+            out[col] = data.iloc[:, 0] if isinstance(data, pd.DataFrame) else data
+    return out
+
+
 def normalize_col(name):
     """Normalize a column header for fuzzy matching."""
     s = str(name).lower().strip()
@@ -92,6 +111,7 @@ def smart_rename(df, expected_columns):
 
 def coerce_numerics(df):
     """Ensure columns that should be numeric are actually numeric."""
+    df = _collapse_duplicate_columns(df)
     for col in df.columns:
         if col in NUMERIC_COLUMNS:
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -100,6 +120,7 @@ def coerce_numerics(df):
 
 def derive_columns(df):
     """Compute missing derived columns from available data."""
+    df = _collapse_duplicate_columns(df)
     if "total_cases" not in df.columns and "good_cases" in df.columns:
         if "bad_cases" in df.columns:
             df["total_cases"] = df["good_cases"] + df["bad_cases"]
