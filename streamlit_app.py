@@ -1,8 +1,13 @@
 """Repo-root entry point for Streamlit Cloud."""
 import sys, os, importlib.util
 
+<<<<<<< HEAD
 # Add mes-oee-analyzer to Python path so all modules are importable
 _pkg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mes-oee-analyzer")
+=======
+# Add operations-intelligence-analyzer to Python path so all modules are importable
+_pkg = os.path.join(os.path.dirname(os.path.abspath(__file__)), "operations-intelligence-analyzer")
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 sys.path.insert(0, _pkg)
 
 # Load and execute the real app (avoids circular import from same filename)

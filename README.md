@@ -1,15 +1,29 @@
+<<<<<<< HEAD
 # 📊 Operations Intelligence Analyzer
+=======
+# Operations Intelligence Analyzer
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
-**Operations intelligence for manufacturing.** Upload raw MES exports — OEE metrics, event logs, shift passdowns, even floor photos — and get back actionable analysis: fault classification, downtime Pareto, SPC trends, shift deep dives, and prioritized recommendations.
+Operations intelligence for manufacturing. Upload raw MES exports and receive actionable analysis: fault classification, downtime Pareto, SPC trends, shift deep dives, and prioritized recommendations.
 
-Built by a manufacturing engineer who got tired of spreadsheet hell.
+Live demo: https://operations-intelligence-analyzer-esh6dt3bptdjg83ubda4wb.streamlit.app/
 
+<<<<<<< HEAD
 ### [🚀 Live Demo](https://operations-intelligence-analyzer.streamlit.app/)
+=======
+Compatibility note: Compatible with MES exports, including common vendor formats.
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
----
+## What it does
 
-## What It Does
+- Production-weighted OEE and loss analysis
+- Downtime Pareto with cause classification
+- Shift-level deep dives and dead-hour narratives
+- AI-assisted photo/context issue extraction
+- Historical trend memory and anomaly support
+- Excel and PDF outputs plus Streamlit UI
 
+<<<<<<< HEAD
 ### 📈 Analysis Engine
 - **Production-weighted OEE** — `Σ(metric × hours) / Σ(hours)`, not naive averages that let short bad intervals skew the picture
 - **Automatic fault classification** — Equipment, Process, Scheduled, Data Gap — using domain-specific keyword taxonomy
@@ -72,34 +86,47 @@ pip install -r requirements.txt
 ```
 
 ### Run the Web App
+=======
+## Quick start
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
 ```bash
+git clone https://github.com/brcrusoe72/operations-intelligence-analyzer.git
+cd operations-intelligence-analyzer
+pip install -r operations-intelligence-analyzer/requirements.txt
 streamlit run streamlit_app.py
 ```
 
-Then open [http://localhost:8501](http://localhost:8501) and upload your data.
-
-### CLI
+CLI example:
 
 ```bash
+<<<<<<< HEAD
 # Full OEE analysis → Excel workbook
 python <package_dir>/analyze.py your_export.xlsx
 
 # With downtime context
 python <package_dir>/analyze.py your_export.xlsx --downtime kb.json
+=======
+python operations-intelligence-analyzer/analyze.py your_export.xlsx
+python operations-intelligence-analyzer/analyze.py your_export.xlsx --downtime kb.json
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 ```
+
+## Inputs
+
+- OEE period-detail exports
+- Event summary/downtime exports
+- Pre-processed hourly workbooks
+- Shift passdown files
+- Optional photo/context files
 
 ## Architecture
 
-```
-Raw MES Data → Parsing/Normalization → Analysis Engine → Learning Memory → Reporting
-                                            ↑
-                                    AI Photo Analysis
-                                    Event Classification
-                                    SPC Trend Engine
-                                    Operations Intelligence
+```text
+Raw MES Data -> Parsing/Normalization -> Analysis Engine -> Learning Memory -> Reporting
 ```
 
+<<<<<<< HEAD
 | Module | Lines | Role |
 |--------|-------|------|
 | `analyze.py` | 2,500 | Core OEE engine — fuzzy loading, weighted math, workbook generation |
@@ -114,43 +141,32 @@ Raw MES Data → Parsing/Normalization → Analysis Engine → Learning Memory �
 | `data_normalization.py` | 140 | Header mapping, column coercion, derived column generation |
 | `operations_intelligence.py` | 90 | Action scoring, handoff packets, anomaly detection |
 | `db.py` | 350 | Optional Supabase persistence for equipment knowledge and run history |
+=======
+Core parser module: `operations-intelligence-analyzer/parse_mes.py`
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
-## Key Design Decisions
+## Vendor-neutral compatibility
 
-**Production-weighted metrics** — OEE is always weighted by production hours. A 15-minute interval with 20% OEE doesn't tank an 8-hour shift average.
+This project is vendor-neutral by design. It accepts common MES export shapes and normalizes them into a canonical internal schema.
 
+<<<<<<< HEAD
 **Fuzzy matching everywhere** — Headers vary across MES versions, plant configs, and export settings. The analyzer handles it with 50+ mappings and positional fallback.
+=======
+## Naming guideline
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
-**Classification hierarchy** — `Unassigned → Scheduled → Micro Stops → Process → Equipment → Fallback → Unclassified`. More specific categories take priority.
-
-**Learning memory** — Every run is fingerprinted and stored. Duplicates are ignored. The system gets smarter with each analysis.
-
-**Photo analysis as first-class input** — Floor photos aren't just attachments. They're parsed by AI, converted to structured downtime data, and merged into the analysis pipeline with shift-specific matching.
-
-## Tech Stack
-
-Python · pandas · NumPy · openpyxl · xlsxwriter · fpdf2 · Streamlit · Altair · OpenAI (vision) · Supabase (optional)
+Do not introduce vendor trademarks into product names, public slugs, or primary identifiers unless technical interoperability requires it. Prefer neutral terms such as MES, operations, line, and shift.
 
 ## Tests
 
 ```bash
+<<<<<<< HEAD
 python -m pytest -v
+=======
+python -m pytest operations-intelligence-analyzer/ -v
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 ```
-
-Covers core OEE math, fault classification, parser behaviors, report assembly, shift deep dives, SPC/trend structures, and photo analysis transforms.
-
-## Roadmap
-
-- [ ] PyPI package (`pip install oee-analyzer`)
-- [ ] REST API for system integration
-- [ ] Multi-plant support
-- [ ] Real-time MES connection (beyond file uploads)
-- [ ] Configurable alert thresholds
 
 ## License
 
 MIT
-
----
-
-*Built with domain knowledge from food manufacturing floors — not just tutorials.*

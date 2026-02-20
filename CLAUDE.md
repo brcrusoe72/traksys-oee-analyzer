@@ -1,9 +1,14 @@
 # CLAUDE.md
 
+<<<<<<< HEAD
 This file captures the **current state of the repository** so coding agents can keep their core assumptions aligned with what actually exists.
+=======
+This file provides contributor guidance for coding agents in this repository.
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
-## Project Overview
+## Project overview
 
+<<<<<<< HEAD
 **Operations Intelligence Analyzer** is a production-focused OEE analysis suite for manufacturing operations. It ingests MES exports (including MES-style exports), classifies downtime causes, computes production-weighted KPIs, and emits Excel/PDF/web outputs.
 
 Primary implementation lives in `mes-oee-analyzer/` (repository path retained for compatibility), with a thin root-level `streamlit_app.py` launcher.
@@ -24,11 +29,19 @@ Primary implementation lives in `mes-oee-analyzer/` (repository path retained fo
    - Root `streamlit_app.py` forwards into package app code in `mes-oee-analyzer/streamlit_app.py`.
 7. **Branding was generalized, but paths remain stable.**
    - User-facing naming is now "Operations Intelligence Analyzer" while historical `mes-*` file/repo names remain in place.
+=======
+Operations Intelligence Analyzer is a production-focused OEE analysis suite for manufacturing operations. It ingests MES exports, computes production-weighted KPIs, classifies downtime causes, and generates Excel/PDF/web outputs.
+
+Primary code lives in `operations-intelligence-analyzer/` with a root `streamlit_app.py` launcher.
+
+Compatibility note: Compatible with MES exports, including common vendor formats.
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
 ## Commands
 
 ```bash
 # Install dependencies
+<<<<<<< HEAD
 pip install -r mes-oee-analyzer/requirements.txt
 
 # Run all tests
@@ -45,9 +58,34 @@ python mes-oee-analyzer/analyze.py <oee_export.xlsx> [--downtime kb.json]
 ```
 
 No linter/formatter is enforced in this repository.
+=======
+pip install -r operations-intelligence-analyzer/requirements.txt
 
-## Architecture
+# Run tests
+python -m pytest operations-intelligence-analyzer/test_core.py -v
+python -m pytest operations-intelligence-analyzer/test_analysis_report.py -v
+python -m pytest operations-intelligence-analyzer/ -v
 
+# Run Streamlit app locally
+streamlit run streamlit_app.py
+
+# CLI analysis
+python operations-intelligence-analyzer/analyze.py <oee_export.xlsx> [--downtime kb.json]
+```
+
+## Active modules
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
+
+- `analyze.py`: orchestration and workbook generation
+- `parse_mes.py`: MES export parsing and format detection
+- `parse_passdown.py`: passdown parsing into downtime-compatible records
+- `shared.py`: domain constants and classification helpers
+- `ingest_router.py`: upload routing and parser chain
+- `oee_history.py`: run history and trend intelligence
+- `shift_report.py`: shift deep-dive reporting
+- `streamlit_app.py`: interactive app
+
+<<<<<<< HEAD
 ```
 Input (Excel/JSON/Photos/Passdowns)
   → Ingestion + Normalization
@@ -78,3 +116,15 @@ Input (Excel/JSON/Photos/Passdowns)
 - Maintain **fuzzy compatibility** with real-world export variability (sheet names and column headers).
 - Keep **fault classification precedence** deterministic and centralized in shared logic.
 - Preserve **append-only analysis memory/trend behavior** unless explicitly asked to migrate it.
+=======
+## Design expectations
+
+- Use production-weighted metrics (`sum(metric * hours) / sum(hours)`).
+- Preserve fuzzy compatibility with real-world sheet/header variance.
+- Keep classification precedence deterministic and centralized.
+- Keep naming vendor-neutral.
+
+## Internal naming guideline
+
+Do not introduce vendor trademarks into product names, public slugs, metadata, or primary identifiers unless required for technical interoperability. Prefer neutral language.
+>>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)

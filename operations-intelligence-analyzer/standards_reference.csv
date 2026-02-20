@@ -1,0 +1,15 @@
+line,product,target_cases_8h,cases_per_pallet,pcs_per_case
+Line 1,6-Trayed,4000,56,6
+Line 1,6-Shrink,3500,56,6
+Line 1,6-Shrink/28oz,3500,200,6
+Line 2,6 Pack,7800,102,6
+Line 2,8 Pack,30000,240,8
+Line 2,12 Pack,25000,176,12
+Line 3,12 Pack,11600,204,12
+Line 3,24 Pack,6000,102,24
+Line 4,6/4 Pack,4800,77,24
+Line 4,6 Pack,4500,102,6
+Line 4,12 Pack,7800,204,12
+Line 4,24 Pack,3000,102,24
+Line 5,12 Pack,7800,204,12
+Line 5,24 Pack,3000,102,24

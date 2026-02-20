@@ -1,0 +1,4 @@
+total_hours,total_cases,availability,performance,quality,good_cases
+1.0,50,0.50,0.60,0.95,47
+0.5,40,0.90,0.80,0.98,39
+1.5,210,0.95,0.92,0.99,208

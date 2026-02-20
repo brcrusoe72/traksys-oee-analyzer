@@ -1,0 +1,1 @@
+{"availability":0.79,"performance":0.83,"quality":0.98,"oee":64.39}
