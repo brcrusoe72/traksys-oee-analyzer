@@ -43,7 +43,10 @@ def excel_date_to_datetime(serial):
         return pd.NaT
     if isinstance(serial, (pd.Timestamp, datetime)):
         return serial
-    return EXCEL_EPOCH + timedelta(days=float(serial))
+    try:
+        return EXCEL_EPOCH + timedelta(days=float(serial))
+    except (TypeError, ValueError):
+        return pd.NaT
 
 
 # ---------------------------------------------------------------------------
@@ -1857,9 +1860,13 @@ def analyze(hourly, shift_summary, overall, hour_avg, downtime=None,
     # SHEETS 2-4: PER-SHIFT SHEETS
     # ===================================================================
     shift_order = ["1st (7a-3p)", "2nd (3p-11p)", "3rd (11p-7a)"]
-    actual_shifts = hourly["shift"].unique().tolist()
+    actual_shifts = [
+        s for s in hourly["shift"].dropna().tolist()
+        if str(s).strip() and str(s).lower() != "nan"
+    ]
+    actual_shifts = list(dict.fromkeys(actual_shifts))
     if not any(s in actual_shifts for s in shift_order):
-        shift_order = sorted(actual_shifts)
+        shift_order = sorted(actual_shifts, key=lambda x: str(x))
 
     for shift_name in shift_order:
         if shift_name not in actual_shifts:
@@ -2721,7 +2728,10 @@ def main():
     suffix = "_FULL_ANALYSIS" if downtime else "_ANALYSIS"
 
     n_days = hourly["date_str"].nunique()
-    dates = sorted(hourly["date_str"].unique())
+    dates = sorted(
+        d for d in hourly["date_str"].dropna().astype(str).unique()
+        if d and d.lower() != "nan"
+    )
     print(f"\n{'='*60}")
     print(f"  Analyzing: {', '.join(dates)} ({n_days} day(s))")
     print(f"{'='*60}")

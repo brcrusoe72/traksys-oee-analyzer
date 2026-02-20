@@ -1,64 +1,20 @@
 # CLAUDE.md
 
-<<<<<<< HEAD
-This file captures the **current state of the repository** so coding agents can keep their core assumptions aligned with what actually exists.
-=======
-This file provides contributor guidance for coding agents in this repository.
->>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
+Contributor guidance for coding agents working in this repository.
 
-## Project overview
+## Project Overview
 
-<<<<<<< HEAD
-**Operations Intelligence Analyzer** is a production-focused OEE analysis suite for manufacturing operations. It ingests MES exports (including MES-style exports), classifies downtime causes, computes production-weighted KPIs, and emits Excel/PDF/web outputs.
+Operations Intelligence Analyzer ingests MES exports, computes production-weighted KPIs, classifies downtime causes, and generates Excel/PDF/web outputs.
 
-Primary implementation lives in `mes-oee-analyzer/` (repository path retained for compatibility), with a thin root-level `streamlit_app.py` launcher.
-
-## Current Core Assumptions (verified)
-
-1. **Tests are the strongest source of behavioral truth.**
-   - The repository currently has 207 passing tests across core math, parser behavior, report generation, shift reporting, photo analysis, standards parsing, and operations intelligence.
-2. **`analyze.py` remains the orchestration center.**
-   - It owns fuzzy loading, metric calculation, narrative generation, and Excel output assembly.
-3. **`shift_report.py` is the active deep-dive report path.**
-   - Legacy references to `third_shift_report.py` / `third_shift_targets.py` are outdated and should not be assumed.
-4. **Normalization and ingestion are modularized.**
-   - `data_normalization.py`, `ingest_router.py`, and `canonical_schema.py` exist and are part of the current ingestion strategy.
-5. **Persistence is optional and mixed-mode.**
-   - Local file artifacts (`history.jsonl` / trend JSON) are still expected, while `db.py` supports optional Supabase-backed persistence.
-6. **Streamlit entrypoint exists in two places for convenience.**
-   - Root `streamlit_app.py` forwards into package app code in `mes-oee-analyzer/streamlit_app.py`.
-7. **Branding was generalized, but paths remain stable.**
-   - User-facing naming is now "Operations Intelligence Analyzer" while historical `mes-*` file/repo names remain in place.
-=======
-Operations Intelligence Analyzer is a production-focused OEE analysis suite for manufacturing operations. It ingests MES exports, computes production-weighted KPIs, classifies downtime causes, and generates Excel/PDF/web outputs.
-
-Primary code lives in `operations-intelligence-analyzer/` with a root `streamlit_app.py` launcher.
+Primary implementation path: `operations-intelligence-analyzer/`  
+Root launcher: `streamlit_app.py`
 
 Compatibility note: Compatible with MES exports, including common vendor formats.
->>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
 
 ## Commands
 
 ```bash
 # Install dependencies
-<<<<<<< HEAD
-pip install -r mes-oee-analyzer/requirements.txt
-
-# Run all tests
-python -m pytest mes-oee-analyzer/ -v
-
-# Run a focused suite
-python -m pytest mes-oee-analyzer/test_core.py -v
-
-# Run Streamlit UI (root launcher)
-streamlit run streamlit_app.py
-
-# CLI analysis
-python mes-oee-analyzer/analyze.py <oee_export.xlsx> [--downtime kb.json]
-```
-
-No linter/formatter is enforced in this repository.
-=======
 pip install -r operations-intelligence-analyzer/requirements.txt
 
 # Run tests
@@ -66,65 +22,43 @@ python -m pytest operations-intelligence-analyzer/test_core.py -v
 python -m pytest operations-intelligence-analyzer/test_analysis_report.py -v
 python -m pytest operations-intelligence-analyzer/ -v
 
-# Run Streamlit app locally
+# Run app
 streamlit run streamlit_app.py
 
 # CLI analysis
 python operations-intelligence-analyzer/analyze.py <oee_export.xlsx> [--downtime kb.json]
 ```
 
-## Active modules
->>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
+## Current Core Assumptions
 
-- `analyze.py`: orchestration and workbook generation
-- `parse_mes.py`: MES export parsing and format detection
-- `parse_passdown.py`: passdown parsing into downtime-compatible records
-- `shared.py`: domain constants and classification helpers
-- `ingest_router.py`: upload routing and parser chain
-- `oee_history.py`: run history and trend intelligence
-- `shift_report.py`: shift deep-dive reporting
-- `streamlit_app.py`: interactive app
+1. Tests are the primary behavioral truth and should be updated with parser/logic changes.
+2. `analyze.py` remains the orchestration center for ingest, metric calculation, and workbook output.
+3. `shift_report.py` is the active deep-dive reporting path.
+4. Ingestion is modular (`parse_mes.py`, `parse_passdown.py`, `data_normalization.py`, `ingest_router.py`).
+5. Persistence is mixed-mode: local history files are standard; Supabase in `db.py` is optional.
+6. Root `streamlit_app.py` is a thin launcher to package app code.
+7. Naming is vendor-neutral in product-facing text and identifiers unless interoperability requires otherwise.
 
-<<<<<<< HEAD
-```
-Input (Excel/JSON/Photos/Passdowns)
-  → Ingestion + Normalization
-  → Analysis Engine
-  → Reporting + Trend Intelligence
-```
+## Active Modules
 
-### Active Modules
-
-- **`analyze.py`** — Main OEE pipeline: fuzzy sheet/column matching, weighted KPIs, downtime narratives, and workbook generation.
-- **`shared.py`** — Canonical domain constants and logic: fault keywords, product normalization, rated speeds, and helper utilities.
-- **`parse_mes.py`** — MES export parsing and format detection.
-- **`parse_passdown.py`** — Shift passdown parsing into analyzable downtime/event records.
-- **`data_normalization.py`** — Header/value normalization and canonical field preparation.
-- **`ingest_router.py`** — Routes incoming files to parser/normalization pathways.
-- **`canonical_schema.py`** — Shared schema definitions for normalized structures.
-- **`oee_history.py`** — Run history and trend/SPC intelligence.
-- **`analysis_report.py`** — PDF analysis report generation.
-- **`shift_report.py`** — Shift deep-dive reporting path.
-- **`photo_analysis.py`** — Vision-assisted issue extraction from photos/attachments.
-- **`operations_intelligence.py`** — Action scoring, trend anomaly support, and handoff intelligence.
-- **`db.py`** — Optional Supabase persistence and schema helpers.
-- **`streamlit_app.py`** — Interactive web app.
+- `operations-intelligence-analyzer/analyze.py`
+- `operations-intelligence-analyzer/parse_mes.py`
+- `operations-intelligence-analyzer/parse_passdown.py`
+- `operations-intelligence-analyzer/data_normalization.py`
+- `operations-intelligence-analyzer/ingest_router.py`
+- `operations-intelligence-analyzer/canonical_schema.py`
+- `operations-intelligence-analyzer/oee_history.py`
+- `operations-intelligence-analyzer/shift_report.py`
+- `operations-intelligence-analyzer/analysis_report.py`
+- `operations-intelligence-analyzer/photo_analysis.py`
+- `operations-intelligence-analyzer/operations_intelligence.py`
+- `operations-intelligence-analyzer/db.py`
+- `operations-intelligence-analyzer/streamlit_app.py`
 
 ## Design Expectations
 
-- Prefer **production-weighted metrics** (`Σ(metric × hours) / Σ(hours)`) over naive averaging.
-- Maintain **fuzzy compatibility** with real-world export variability (sheet names and column headers).
-- Keep **fault classification precedence** deterministic and centralized in shared logic.
-- Preserve **append-only analysis memory/trend behavior** unless explicitly asked to migrate it.
-=======
-## Design expectations
-
-- Use production-weighted metrics (`sum(metric * hours) / sum(hours)`).
-- Preserve fuzzy compatibility with real-world sheet/header variance.
-- Keep classification precedence deterministic and centralized.
-- Keep naming vendor-neutral.
-
-## Internal naming guideline
-
-Do not introduce vendor trademarks into product names, public slugs, metadata, or primary identifiers unless required for technical interoperability. Prefer neutral language.
->>>>>>> 7037fd9 (Rebrand to operations-intelligence and restore parser/test compatibility)
+- Use production-weighted metrics over naive averaging.
+- Preserve fuzzy compatibility for sheet/header variability.
+- Keep fault classification precedence deterministic and centralized.
+- Preserve append-only memory/trend behavior unless explicitly asked to migrate it.
+- Keep naming vendor-neutral in public-facing text and primary identifiers.
