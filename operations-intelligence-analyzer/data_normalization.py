@@ -1,6 +1,7 @@
 """Shared dataframe normalization utilities for analysis ingestion."""
 
 from datetime import datetime
+import re
 import pandas as pd
 
 
@@ -53,7 +54,8 @@ NUMERIC_COLUMNS = {
 
 def normalize_col(name):
     """Normalize a column header for fuzzy matching."""
-    return str(name).lower().strip().replace("_", "").replace(" ", "")
+    s = str(name).lower().strip()
+    return re.sub(r"[^a-z0-9]+", "", s)
 
 
 def smart_rename(df, expected_columns):

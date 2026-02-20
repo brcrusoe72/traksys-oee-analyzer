@@ -497,7 +497,27 @@ def _load_single_sheet_oee(filepath):
     sheet_name = xls.sheet_names[0]
     xls.close()
 
-    hourly = pd.read_excel(filepath, sheet_name=sheet_name)
+    # Some exports include one or more non-header rows before the real header.
+    raw = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
+    best_row = 0
+    best_score = -1
+    scan_rows = min(len(raw), 20)
+    expected_norm = {_normalize_col(c) for c in EXPECTED_SHEETS["DayShiftHour"]["columns"]}
+    for idx in range(scan_rows):
+        row_vals = raw.iloc[idx].tolist()
+        row_norm = {_normalize_col(v) for v in row_vals if str(v).strip() and str(v).lower() != "nan"}
+        score = len([v for v in row_norm if v in _HEADER_TO_INTERNAL or v in expected_norm])
+        if score > best_score:
+            best_score = score
+            best_row = idx
+
+    if best_score >= 3:
+        hourly = raw.iloc[best_row + 1 :].copy()
+        hourly.columns = [str(v).strip() for v in raw.iloc[best_row].tolist()]
+        hourly = hourly.dropna(axis=1, how="all").dropna(how="all")
+    else:
+        hourly = pd.read_excel(filepath, sheet_name=sheet_name)
+
     hourly = _smart_rename(hourly, EXPECTED_SHEETS["DayShiftHour"]["columns"])
     hourly = _coerce_numerics(hourly)
     hourly = _derive_columns(hourly)
