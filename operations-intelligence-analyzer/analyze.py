@@ -561,6 +561,163 @@ def _loose_single_sheet_rename(df):
     return df
 
 
+def _load_traksys_oee_overview(filepath, sheet_name, raw_peek):
+    """Parse MES OEE Overview exports with Start/End/System/KPI Calc metadata rows.
+
+    Traksys OEE Overview format:
+      Row 1: Start | <start_date> | ...
+      Row 2: End   | <end_date>   | ...
+      Row 3: System| <line_name>  | ... | <header: GroupValue> | <header: GroupLabel> | ...
+      Row 4: KPI Calc | <kpi_name> | ...
+      Row 5: Shift | <shift_filter> | ...
+      Row 6+: data rows with columns [GroupValue, GroupLabel, ..., Value, ...]
+    """
+    # Extract metadata from the first few rows.
+    line_name = str(raw_peek.iloc[2, 1]).strip() if len(raw_peek) > 2 else "All"
+    # Normalize line name: "Line 1 - Gallon" -> "Line 1"
+    import re as _re
+    _line_match = _re.match(r"(Line\s*\d+)", line_name, _re.IGNORECASE)
+    if _line_match:
+        line_label = _line_match.group(1)
+    else:
+        line_label = line_name
+
+    # Find the header row — look for "GroupValue" or similar in the first row (row 1).
+    # In this format, columns D+ of row 1 are the actual data headers.
+    # Read the full file with row 1 as header (0-indexed: header=0).
+    raw = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
+
+    # The true data headers are in row 1 (the "Start" row), columns D onward.
+    # Row 1 col A="Start", col B=<date>, col C=None, col D="GroupValue", col E="GroupLabel", ...
+    header_row_idx = 0
+    header_vals = raw.iloc[header_row_idx].tolist()
+
+    # Metadata rows to skip: rows 1-5 (End, System, KPI Calc, Shift, possibly Product).
+    # Data starts where column A is no longer a known metadata label.
+    metadata_labels = {"end", "system", "kpi calc", "shift", "product", ""}
+    data_start_idx = 1
+    for i in range(1, min(len(raw), 10)):
+        label = str(raw.iloc[i, 0]).strip().lower()
+        if label not in metadata_labels:
+            data_start_idx = i
+            break
+        data_start_idx = i + 1
+
+    # Build a clean DataFrame from data rows with proper headers.
+    data = raw.iloc[data_start_idx:].copy()
+    data.columns = [str(v).strip() if pd.notna(v) else f"col_{idx}" for idx, v in enumerate(header_vals)]
+    data = data.dropna(how="all").reset_index(drop=True)
+
+    # Map Traksys OEE Overview columns to internal schema.
+    # GroupValue = timestamp (datetime), Value = OEE % (already 0-100 scale)
+    col_renames = {}
+    for col in data.columns:
+        cl = col.lower().strip()
+        if cl == "groupvalue":
+            col_renames[col] = "timestamp"
+        elif cl == "value":
+            col_renames[col] = "oee_pct"
+        elif cl == "valuedecimal":
+            col_renames[col] = "oee_decimal"
+    data = data.rename(columns=col_renames)
+
+    # Parse timestamp and derive shift/hour columns.
+    if "timestamp" in data.columns:
+        data["timestamp"] = pd.to_datetime(data["timestamp"], errors="coerce")
+        data = data.dropna(subset=["timestamp"])
+        data["shift_date"] = data["timestamp"].dt.date.astype(str)
+        data["shift_hour"] = data["timestamp"].dt.hour + 1
+        data["time_block"] = data["timestamp"].dt.strftime("%H:%M")
+        data["shift"] = data["shift_hour"].apply(_shift_from_hour)
+
+    # Coerce OEE and related numeric columns.
+    for col in ["oee_pct", "oee_decimal"]:
+        if col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0.0)
+
+    # Map remaining Traksys columns to internal names.
+    _traksys_to_internal = {
+        "intervalseconds": "interval_seconds",
+        "netoperationseconds": "net_operation_seconds",
+        "runtimeseconds": "run_time_seconds",
+        "ratelossseconds": "rate_loss_seconds",
+        "totalcalculationunits": "total_calc_units",
+        "goodcalculationunits": "good_calc_units",
+        "badcalculationunits": "bad_calc_units",
+        "totaldisplayunits": "total_cases",
+        "gooddisplayunits": "good_cases",
+        "baddisplayunits": "bad_cases",
+        "mtbfseconds": "mtbf_seconds",
+        "mttrseconds": "mttr_seconds",
+        "systemnotscheduledseconds": "not_scheduled_seconds",
+        "legalloss seconds": "legal_loss_seconds",
+    }
+    rename_map = {}
+    for col in data.columns:
+        cl = col.lower().strip().replace(" ", "")
+        if cl in _traksys_to_internal and _traksys_to_internal[cl] not in data.columns:
+            rename_map[col] = _traksys_to_internal[cl]
+    data = data.rename(columns=rename_map)
+
+    # Derive availability/performance/quality if present as columns.
+    # Traksys exports may have these directly (as % values already mapped via _smart_rename).
+    for metric in ["availability", "performance", "quality"]:
+        if metric not in data.columns:
+            # Check for Traksys-named versions
+            for col in data.columns:
+                if col.lower().strip() == metric:
+                    data[metric] = pd.to_numeric(data[col], errors="coerce").fillna(0.0)
+                    break
+        if metric in data.columns:
+            data[metric] = pd.to_numeric(data[metric], errors="coerce").fillna(0.0)
+
+    # Derive total_hours from interval_seconds.
+    if "total_hours" not in data.columns:
+        if "interval_seconds" in data.columns:
+            data["total_hours"] = pd.to_numeric(data["interval_seconds"], errors="coerce").fillna(3600) / 3600.0
+        else:
+            data["total_hours"] = 1.0
+
+    # Derive total_cases/good_cases/bad_cases.
+    for col in ["total_cases", "good_cases", "bad_cases"]:
+        if col in data.columns:
+            data[col] = pd.to_numeric(data[col], errors="coerce").fillna(0)
+    if "total_cases" not in data.columns:
+        data["total_cases"] = data.get("good_cases", 0) + data.get("bad_cases", 0)
+    if "good_cases" not in data.columns:
+        data["good_cases"] = data.get("total_cases", 0)
+    if "bad_cases" not in data.columns:
+        data["bad_cases"] = 0
+
+    # Derive cases_per_hour.
+    if "cases_per_hour" not in data.columns:
+        total_hrs = data["total_hours"].replace(0, np.nan)
+        data["cases_per_hour"] = (data["total_cases"] / total_hrs).fillna(0)
+
+    # Derive product_code from column if available, else empty.
+    if "product_code" not in data.columns:
+        data["product_code"] = ""
+
+    # Add line label.
+    data["line"] = line_label
+
+    # Final derived columns.
+    data["date"] = pd.to_datetime(data["shift_date"], errors="coerce")
+    data["date_str"] = data["date"].dt.strftime("%Y-%m-%d")
+    data["day_of_week"] = data["date"].dt.day_name()
+
+    # Filter out non-production shifts.
+    if "shift" in data.columns:
+        data["shift"] = data["shift"].map(_canonical_shift_label)
+        _non_production = {"No Shift", "no shift", None}
+        data = data[~data["shift"].isin(_non_production)].reset_index(drop=True)
+
+    hourly = data
+    print(f"  Parsed Traksys OEE Overview: {len(hourly)} hourly records, line={line_label}")
+    shift_summary, overall, hour_avg = _build_summary_frames_from_hourly(hourly)
+    return hourly, shift_summary, overall, hour_avg
+
+
 def _load_single_sheet_oee(filepath):
     """Fallback parser for one-sheet OEE exports (often named 'Data')."""
     xls = pd.ExcelFile(filepath)
@@ -568,6 +725,11 @@ def _load_single_sheet_oee(filepath):
         raise ValueError("single-sheet fallback only applies to one-sheet OEE files")
     sheet_name = xls.sheet_names[0]
     xls.close()
+
+    # Check for MES OEE Overview format (Start/End/System/KPI Calc metadata rows).
+    raw_peek = pd.read_excel(filepath, sheet_name=sheet_name, header=None, nrows=10)
+    if len(raw_peek) >= 3 and str(raw_peek.iloc[0, 0]).strip().lower() == "start":
+        return _load_traksys_oee_overview(filepath, sheet_name, raw_peek)
 
     # Some exports include one or more non-header rows before the real header.
     raw = pd.read_excel(filepath, sheet_name=sheet_name, header=None)
@@ -618,7 +780,10 @@ def _load_single_sheet_oee(filepath):
 
     needed = {"shift_date", "shift", "shift_hour", "total_hours", "total_cases", "oee_pct"}
     if "shift_hour" not in hourly.columns and "time_block" in hourly.columns:
-        parsed_tb = pd.to_datetime(hourly["time_block"], errors="coerce")
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("ignore", UserWarning)
+            parsed_tb = pd.to_datetime(hourly["time_block"], errors="coerce")
         if parsed_tb.notna().any():
             hourly.loc[parsed_tb.notna(), "shift_hour"] = parsed_tb[parsed_tb.notna()].dt.hour + 1
             if "shift_date" not in hourly.columns:
@@ -626,8 +791,11 @@ def _load_single_sheet_oee(filepath):
 
     # If date/hour are still missing, try to infer from any datetime-like column.
     if "shift_date" not in hourly.columns or "shift_hour" not in hourly.columns:
+        import warnings as _w
         for col in hourly.columns:
-            parsed = pd.to_datetime(hourly[col], errors="coerce")
+            with _w.catch_warnings():
+                _w.simplefilter("ignore", UserWarning)
+                parsed = pd.to_datetime(hourly[col], errors="coerce")
             if parsed.notna().sum() < 1:
                 continue
             if "shift_date" not in hourly.columns:

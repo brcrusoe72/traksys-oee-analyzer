@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 
 import pandas as pd
 
 from analyze import load_downtime_data, load_oee_data
 from parse_mes import detect_file_type, parse_event_summary, parse_oee_period_detail
+from vigil_agent import VigilDataParser
 
 
 @dataclass
@@ -39,11 +41,53 @@ class IngestBundle:
     meta: IngestMeta
 
 
+_LINE_RE = re.compile(r"(Line\s*\d+)", re.IGNORECASE)
+
+
 def _write_uploaded_file(uploaded_file, tmp_dir: str) -> str:
     path = os.path.join(tmp_dir, uploaded_file.name)
     with open(path, "wb") as f:
         f.write(uploaded_file.getbuffer())
     return path
+
+
+def _extract_line_key(file_name: str, events_df: pd.DataFrame) -> str:
+    def _norm_line(raw: str) -> str:
+        m = _LINE_RE.search(raw or "")
+        if not m:
+            return ""
+        parts = m.group(1).split()
+        return f"Line {parts[-1]}"
+
+    if "system_name" in events_df.columns and len(events_df) > 0:
+        sample = str(events_df["system_name"].dropna().iloc[0]) if events_df["system_name"].notna().any() else ""
+        line = _norm_line(sample)
+        if line:
+            return line
+    line = _norm_line(file_name)
+    if line:
+        return line
+    return "All"
+
+
+def _artifact_to_downtime_dict(artifact) -> dict | None:
+    if artifact.kind not in {"event_overview", "event_summary", "passdown"}:
+        return None
+    reasons_df = artifact.frames.get("reasons_df", pd.DataFrame())
+    events_df = artifact.frames.get("events_df", pd.DataFrame())
+    shift_reasons_df = artifact.frames.get("shift_reasons_df", pd.DataFrame())
+    return {
+        "reasons_df": reasons_df,
+        "events_df": events_df,
+        "shift_reasons_df": shift_reasons_df,
+        "pareto_df": pd.DataFrame(),
+        "findings": [],
+        "shift_samples": [],
+        "event_samples": [],
+        "meta": dict(getattr(artifact, "meta", {}) or {}),
+        "oee_summary": {},
+        "pareto_raw": {},
+    }
 
 
 def ingest_uploaded_inputs(oee_files, downtime_files, context_files, tmp_dir: str) -> IngestBundle:
@@ -57,6 +101,7 @@ def ingest_uploaded_inputs(oee_files, downtime_files, context_files, tmp_dir: st
     parser_chain: list[str] = []
     info_messages: list[str] = []
     warning_messages: list[str] = []
+    vigil_parser = VigilDataParser()
 
     # OEE files (structured)
     for oee_file in oee_files or []:
@@ -67,6 +112,11 @@ def ingest_uploaded_inputs(oee_files, downtime_files, context_files, tmp_dir: st
             h, ss, _ov, _ha = parse_oee_period_detail(oee_path)
             detected_sources.add("oee_period_detail")
             parser_chain.append("parse_mes.parse_oee_period_detail")
+        elif file_type == "oee_overview":
+            info_messages.append(f"Detected: {oee_file.name} - OEE Overview (Traksys)")
+            h, ss, _ov, _ha = load_oee_data(oee_path)
+            detected_sources.add("oee_overview")
+            parser_chain.append("analyze.load_oee_data")
         else:
             h, ss, _ov, _ha = load_oee_data(oee_path)
             detected_sources.add("oee_workbook")
@@ -118,7 +168,16 @@ def ingest_uploaded_inputs(oee_files, downtime_files, context_files, tmp_dir: st
                     detected_sources.add("passdown")
                     parser_chain.append("parse_passdown.parse_passdown")
                 else:
-                    warning_messages.append(f"Unrecognized downtime format: {dt_file.name}")
+                    artifact = vigil_parser.parse_file(dt_path)
+                    dt_data = _artifact_to_downtime_dict(artifact)
+                    if dt_data and len(dt_data.get("events_df", pd.DataFrame())) > 0:
+                        line_key = _extract_line_key(dt_file.name, dt_data.get("events_df", pd.DataFrame()))
+                        info_messages.append(f"Detected: {dt_file.name} - {artifact.kind.replace('_', ' ').title()} ({line_key})")
+                        dt_by_line.setdefault(line_key, []).append(dt_data)
+                        detected_sources.add(artifact.kind)
+                        parser_chain.append(f"vigil_agent.{artifact.parser}")
+                    else:
+                        warning_messages.append(f"Unrecognized downtime format: {dt_file.name}")
         except Exception as e:
             warning_messages.append(f"Could not load {dt_file.name}: {e}")
 

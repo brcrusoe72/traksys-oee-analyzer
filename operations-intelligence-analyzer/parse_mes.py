@@ -515,6 +515,8 @@ def detect_file_type(filepath):
     Detect file format:
       'old_oee'            — processed workbook with DayShiftHour sheets
       'oee_period_detail'  — raw MES OEE Period Detail export
+      'oee_overview'       — MES OEE Overview (hourly) export
+      'event_overview'     — MES Event Overview export
       'event_summary'      — raw MES Event Summary (Date) export
       'passdown'           — shift passdown spreadsheet (operator notes)
       'unknown'
@@ -533,6 +535,45 @@ def detect_file_type(filepath):
 
         ws = wb[names[0]]
         b1 = ws.cell(1, 2).value
+        a1 = ws.cell(1, 1).value
+
+        # Check for MES OEE Overview / Event Overview format:
+        # Row 1: "Start" | <datetime>, Row 3: "System" | <line name>,
+        # Row 4: "KPI Calc" | <kpi name>
+        if str(a1).strip().lower() == "start":
+            # Traksys-style pivot export — check if OEE or Event
+            a4 = ws.cell(4, 1).value
+            b4 = ws.cell(4, 2).value
+            # Check headers further down for event columns
+            # OEE Overview has columns like GroupValue, SeriesValue, Value
+            # Event Overview has columns like EventID, StartDateTimeOffset, DurationSeconds
+            header_row = None
+            for row_idx in range(1, min(ws.max_row or 20, 20) + 1):
+                cell_val = str(ws.cell(row_idx, 4).value or "")
+                if cell_val in ("GroupValue", "GroupLabel"):
+                    header_row = row_idx
+                    break
+                if cell_val in ("EventID",):
+                    header_row = row_idx
+                    wb.close()
+                    return "event_overview"
+            if str(a4).strip().lower() == "kpi calc" and str(b4).strip().lower() == "oee":
+                wb.close()
+                return "oee_overview"
+            # Fallback: if we found GroupValue header, it's OEE overview
+            if header_row is not None:
+                wb.close()
+                return "oee_overview"
+            # If column D has EventID-like headers, it's an event overview
+            for row_idx in range(1, min(ws.max_row or 20, 20) + 1):
+                cell_val = str(ws.cell(row_idx, 4).value or "")
+                if "event" in cell_val.lower() and "id" in cell_val.lower():
+                    wb.close()
+                    return "event_overview"
+            # Generic Traksys export with Start/End/System — treat as OEE overview
+            wb.close()
+            return "oee_overview"
+
         wb.close()
 
         if b1 and "OEE" in str(b1):
